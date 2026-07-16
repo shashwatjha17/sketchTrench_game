@@ -1,0 +1,46 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Java / Maven / Gradle
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+target/
+build/
+.gradle/
+out/
+
+# Node / frontend
+node_modules/
+dist/
+.next/
+.nuxt/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# Misc
+*.tmp
+*.temp
+.turbo/
