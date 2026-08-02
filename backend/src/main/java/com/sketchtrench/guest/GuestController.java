@@ -14,7 +14,7 @@ import java.util.Map;
 
 /**
  * REST surface for the guest flow. The caller identifies themselves with the playerId
- * header (the same one issued by {@code POST /api/guest/session}), not a JWT.
+ * header (the same one issued by {@code POST /api/guest/session}).
  */
 @RestController
 @RequestMapping("/api/guest")

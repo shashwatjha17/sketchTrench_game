@@ -41,18 +41,21 @@ const ERASER_SIZE = 24;
 type Tool = 'brush' | 'eraser' | 'fill';
 
 interface CanvasProps {
-  roomId: string;
-  readOnly: boolean;
+  /** Room to broadcast/receive strokes on. Omit for a purely local doodle pad. */
+  roomId?: string;
+  readOnly?: boolean;
+  height?: number;
   initialStrokes?: Stroke[];
 }
 
 /**
- * Chalkboard drawing surface shared by everyone in the room. The drawer's strokes are
- * sent over /topic/drawing/{id} and rendered incrementally on every client.
- * Tools: brush (sizes + full color spectrum), eraser, paint-bucket fill, clear all.
- * Eraser/fill/clear broadcast live but only paths are persisted for replay.
+ * Chalkboard drawing surface. With a roomId it's the shared board (strokes sent over
+ * /topic/drawing/{id}, rendered on every client); without one it's a local doodle pad
+ * for the landing/room pages. Tools: brush (sizes + full color spectrum), eraser,
+ * paint-bucket fill, clear all. Eraser/fill/clear broadcast live but only paths are
+ * persisted for replay.
  */
-export default function Canvas({ roomId, readOnly, initialStrokes }: CanvasProps) {
+export default function Canvas({ roomId, readOnly = false, height = 560, initialStrokes }: CanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const currentStroke = useRef<Point[]>([]);
@@ -61,7 +64,12 @@ export default function Canvas({ roomId, readOnly, initialStrokes }: CanvasProps
   const [color, setColor] = useState('#ffffff');
   const [size, setSize] = useState(6);
 
+  const publish = (payload: DrawEvent) => {
+    if (roomId) stomp.publish(`/app/guest/drawing/${roomId}`, payload);
+  };
+
   useEffect(() => {
+    if (!roomId) return;
     const unsub = stomp.subscribe(`/topic/drawing/${roomId}`, (payload) => {
       const msg = payload as DrawEvent;
       if (msg.type === 'clear') {
@@ -152,7 +160,7 @@ export default function Canvas({ roomId, readOnly, initialStrokes }: CanvasProps
       const p = localPos(e);
       const strokeColor = color;
       fillAt(Math.round(p.x), Math.round(p.y), strokeColor);
-      stomp.publish(`/app/guest/drawing/${roomId}`, { type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color: strokeColor } satisfies FillEvent);
+      publish({ type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color: strokeColor } satisfies FillEvent);
       drawingRef.current = true;
       lastFill.current = p;
       return;
@@ -169,7 +177,7 @@ export default function Canvas({ roomId, readOnly, initialStrokes }: CanvasProps
       const last = lastFill.current;
       if (Math.hypot(p.x - last.x, p.y - last.y) > 40) {
         fillAt(Math.round(p.x), Math.round(p.y), color);
-        stomp.publish(`/app/guest/drawing/${roomId}`, { type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color } satisfies FillEvent);
+        publish({ type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color } satisfies FillEvent);
         lastFill.current = p;
       }
       return;
@@ -193,7 +201,7 @@ export default function Canvas({ roomId, readOnly, initialStrokes }: CanvasProps
     if (!drawingRef.current) return;
     drawingRef.current = false;
     if (currentStroke.current.length > 1) {
-      stomp.publish(`/app/guest/drawing/${roomId}`, {
+      publish({
         type: 'path',
         points: currentStroke.current,
         color: tool === 'eraser' ? BACKGROUND : color,
@@ -205,7 +213,7 @@ export default function Canvas({ roomId, readOnly, initialStrokes }: CanvasProps
 
   const onClear = () => {
     clearCanvas();
-    stomp.publish(`/app/guest/drawing/${roomId}`, { type: 'clear' } satisfies ClearEvent);
+    publish({ type: 'clear' } satisfies ClearEvent);
   };
 
   useEffect(() => {
@@ -220,7 +228,7 @@ export default function Canvas({ roomId, readOnly, initialStrokes }: CanvasProps
         <canvas
           ref={canvasRef}
           width={900}
-          height={560}
+          height={height}
           onPointerDown={onDown}
           onPointerMove={onMove}
           onPointerUp={onUp}

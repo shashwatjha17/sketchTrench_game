@@ -1,50 +1,29 @@
 package com.sketchtrench.guest;
 
-import com.sketchtrench.game.entity.Word;
-import com.sketchtrench.game.repository.WordRepository;
-import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * The word pool lives in memory only. It is seeded once from the words table at startup
- * (those seeds are static game content, not player data) and never touches the DB again.
+ * Static in-memory word pool. Sessions/games are in-memory anyway; the words are static
+ * game content, so a DB-backed store bought nothing. Grow the list if the game feels
+ * repetitive.
  */
-@Slf4j
-@Component
-@RequiredArgsConstructor
-public class WordPool {
+public final class WordPool {
 
-    private static final List<String> FALLBACK = List.of(
+    private static final List<String> WORDS = List.of(
             "sun", "moon", "cat", "dog", "house", "tree", "star", "heart", "flower",
-            "rainbow", "pizza", "book", "car", "hat", "ball", "fish", "bird", "cloud");
+            "rainbow", "pizza", "book", "car", "hat", "ball", "fish", "bird", "cloud",
+            "apple", "banana", "boat", "cake", "castle", "cow", "dragon", "elephant",
+            "ghost", "guitar", "key", "ladder", "lamp", "lion", "mountain", "mouse",
+            "mushroom", "owl", "penguin", "rocket", "robot", "snowman", "spider",
+            "umbrella", "watch", "whale");
 
-    private final WordRepository wordRepository;
-    private volatile List<String> words = FALLBACK;
-
-    @PostConstruct
-    void load() {
-        try {
-            List<String> loaded = wordRepository.findByActiveTrue().stream()
-                    .map(Word::getText)
-                    .filter(t -> t != null && !t.isBlank())
-                    .toList();
-            if (!loaded.isEmpty()) {
-                words = loaded;
-            }
-            log.info("Word pool seeded with {} words", words.size());
-        } catch (Exception e) {
-            log.warn("Could not load words from DB, using built-in fallback: {}", e.getMessage());
-        }
+    private WordPool() {
     }
 
-    public List<String> pick(int n) {
-        List<String> copy = new ArrayList<>(words);
+    public static List<String> pick(int n) {
+        List<String> copy = new ArrayList<>(WORDS);
         Collections.shuffle(copy);
         return copy.subList(0, Math.min(n, copy.size()));
     }

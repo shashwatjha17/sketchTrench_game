@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Maps WebSocket session ids to guest players so inbound STOMP frames can be tied to a player
- * without a JWT. The {@link GuestChannelInterceptor} populates it on CONNECT.
+ * without credentials. The {@link GuestChannelInterceptor} populates it on CONNECT.
  */
 @Component
 public class WebSocketSessionManager {

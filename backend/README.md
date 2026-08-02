@@ -1,13 +1,12 @@
 # Backend
 
-Spring Boot 3.5.x game server for SketchTrench.
+Spring Boot 3.5.x game server for SketchTrench. Everything (sessions, rooms, games) is in-memory on a single instance — no database required.
 
 ## Stack
 
 - Java 21
 - Maven
-- Spring Web, Data JPA, Security, Validation
-- PostgreSQL
+- Spring Web, Security, WebSocket (STOMP over SockJS)
 - Lombok, DevTools
 
 ## Run
@@ -16,11 +15,7 @@ Spring Boot 3.5.x game server for SketchTrench.
 ./mvnw spring-boot:run
 ```
 
-Set database connection via environment variables or `application.properties`:
-
-- `DATABASE_URL` (default: `jdbc:postgresql://localhost:5432/sketchtrench`)
-- `DATABASE_USERNAME` (default: `postgres`)
-- `DATABASE_PASSWORD` (default: `postgres`)
+Listens on `:8080` (`PORT` env to override). Set `CORS_ALLOWED_ORIGINS` to the comma-separated origins your frontend is served from (default `http://localhost:5173,http://localhost:3000`).
 
 ## Build
 

@@ -6,7 +6,7 @@ import { ApiError } from '../api';
 import { stomp } from '../ws';
 import { loadSession, connectWS } from '../guest';
 import Avatar from '../components/Avatar';
-import SketchPad from '../components/SketchPad';
+import Canvas from '../components/Canvas';
 import type { GuestRoomInfo } from '../types';
 
 export default function RoomPage() {
@@ -200,7 +200,7 @@ export default function RoomPage() {
 
       <div className="lg:col-span-2 space-y-2">
         <p className="text-center text-sm font-semibold text-slate-500">✏️ Sketch while you wait</p>
-        <SketchPad height={400} />
+        <Canvas height={400} />
         <p className="text-center text-xs text-slate-400">Your doodles are private — not broadcast.</p>
       </div>
     </div>

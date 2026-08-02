@@ -72,13 +72,6 @@ export interface SecretWord {
   word: string;
 }
 
-export interface RoundStarting {
-  roundNumber: number;
-  drawerId: string;
-  drawerName: string;
-  optionCount: number;
-}
-
 export interface RoundStarted {
   roundNumber: number;
   drawerId: string;
@@ -109,13 +102,6 @@ export interface GameEnded {
   winnerId: string | null;
   winnerName: string | null;
   scores: Record<string, number>;
-}
-
-export interface ChatMessage {
-  userId: string;
-  username: string;
-  text: string;
-  sentAt: string;
 }
 
 export interface TypingIndicator {

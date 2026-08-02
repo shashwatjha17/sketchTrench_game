@@ -8,7 +8,7 @@ import { createGuestSession, resumeSession } from '../guest';
 import type { GuestSession } from '../guest';
 import Avatar from '../components/Avatar';
 import Doodle from '../components/Doodle';
-import SketchPad from '../components/SketchPad';
+import Canvas from '../components/Canvas';
 
 const WORDMARK = 'SketchTrench';
 const WORDMARK_COLORS = ['#ef4444', '#f97316', '#facc15', '#22c55e', '#3b82f6', '#a855f7', '#ec4899', '#ef4444', '#f97316', '#facc15', '#22c55e', '#3b82f6'];
@@ -265,7 +265,7 @@ export default function LobbyPage() {
         <p className="text-center font-semibold text-slate-500">
           ✏️ Sketch while you wait — have fun with the board!
         </p>
-        <SketchPad height={440} />
+        <Canvas height={440} />
         <p className="text-center text-xs text-slate-400">
           Just for you — your doodles are not broadcast to anyone.
         </p>

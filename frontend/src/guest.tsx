@@ -1,5 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
 import { guestApi } from './api';
 import { stomp } from './ws';
 import type { GuestPlayer } from './types';
@@ -29,7 +27,7 @@ function saveSession(s: GuestSession) {
   localStorage.setItem(KEY, JSON.stringify(s));
 }
 
-export function clearSession() {
+function clearSession() {
   localStorage.removeItem(KEY);
 }
 
@@ -83,39 +81,4 @@ export async function resumeSession(): Promise<{ session: GuestSession; roomId: 
     clearSession();
     return null;
   }
-}
-
-export function updateSessionNickname(nickname: string) {
-  const s = loadSession();
-  if (!s) return;
-  saveSession({ ...s, nickname });
-}
-
-export function GuestProvider({ children }: { children: ReactNode }) {
-  return <>{children}</>;
-}
-
-/** Re-exported for convenience; pages that need the live session keep their own state. */
-export function useSession() {
-  const [session, setSession] = useState<GuestSession | null>(() => loadSession());
-  const [roomId, setRoomId] = useState<string | null>(null);
-
-  useEffect(() => {
-    resumeSession().then((r) => {
-      if (r) {
-        setSession(r.session);
-        setRoomId(r.roomId);
-      } else {
-        setSession(null);
-      }
-    });
-  }, []);
-
-  const updateSession = useCallback((s: GuestSession | null) => {
-    if (s) saveSession(s);
-    else clearSession();
-    setSession(s);
-  }, []);
-
-  return { session, roomId, updateSession };
 }

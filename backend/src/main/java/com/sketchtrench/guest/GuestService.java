@@ -37,7 +37,6 @@ public class GuestService {
     private final PlayerSessionManager players;
     private final RoomManager rooms;
     private final WebSocketSessionManager wsSessions;
-    private final WordPool wordPool;
     // @Lazy: GuestService is reached via the WS interceptor during broker init, so the
     // template must not force eager creation (avoids a circular bean dependency).
     private final @Lazy SimpMessagingTemplate messaging;
@@ -194,7 +193,7 @@ public class GuestService {
 
         List<String> texts = room.customWordsEnabled && room.customWords.size() >= 3
                 ? new ArrayList<>(room.customWords)
-                : wordPool.pick(3);
+                : WordPool.pick(3);
         java.util.Collections.shuffle(texts);
         List<GuestDto.WordOption> options = new ArrayList<>();
         for (int i = 0; i < texts.size(); i++) {
