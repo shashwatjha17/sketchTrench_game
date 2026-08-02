@@ -1,7 +1,8 @@
 import { Client, type IMessage } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import { BACKEND_URL } from './api';
 
-const WS_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+const WS_URL = BACKEND_URL;
 
 type Listener = (payload: unknown) => void;
 
