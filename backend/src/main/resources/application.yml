@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: sketchtrench-backend
+
+  # ---- JSON --------------------------------------------------------------
+  jackson:
+    time-zone: UTC
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+# ---- Application-specific settings --------------------------------------
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    root: INFO
+    com.sketchtrench: DEBUG

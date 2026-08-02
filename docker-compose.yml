@@ -1,0 +1,24 @@
+# Full SketchTrench stack: Spring Boot backend + nginx-served frontend.
+# Everything is in-memory on the backend — no DB, no Redis required.
+#
+# Usage:  docker compose up -d --build
+#   Frontend: http://localhost:8081   API + WS proxied through nginx to the backend.
+#
+# For local day-to-day dev you only need the backend (`./mvnw spring-boot:run`)
+# and frontend (`npm run dev`) without Docker.
+services:
+  backend:
+    build: ./backend
+    container_name: sketchtrench-backend
+    environment:
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8081}
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    container_name: sketchtrench-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8081:80"

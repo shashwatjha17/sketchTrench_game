@@ -44,3 +44,19 @@ coverage/
 *.tmp
 *.temp
 .turbo/
+
+# Maven
+target/
+
+# IntelliJ
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+
+# Environment
+.env
