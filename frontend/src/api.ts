@@ -6,6 +6,8 @@ import type {
   SessionResponse,
 } from './types';
 
+const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -21,7 +23,7 @@ async function request<T>(path: string, options: RequestInit = {}, playerId?: st
   const headers: Record<string, string> = { ...(options.headers as Record<string, string>) };
   if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   if (playerId) headers['X-Player-Id'] = playerId;
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(body ?? { status: res.status, error: 'ERROR', message: 'Request failed' });
   return body as T;

@@ -1,6 +1,8 @@
 import { Client, type IMessage } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
 
+const WS_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+
 type Listener = (payload: unknown) => void;
 
 /**
@@ -17,7 +19,7 @@ class StompConnection {
       this.disconnect();
     }
     this.client = new Client({
-      webSocketFactory: () => new SockJS('/ws') as unknown as WebSocket,
+      webSocketFactory: () => new SockJS(`${WS_URL}/ws`) as unknown as WebSocket,
       // the guest flow identifies over WS via the STOMP CONNECT header (GuestChannelInterceptor)
       connectHeaders: { 'X-Player-Id': playerId },
       reconnectDelay: 3000,

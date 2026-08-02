@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: sketchtrench-backend
+    runtime: docker
+    repo: https://github.com/shashwatjha17/sketchTrench_game.git
+    plan: free
+    rootDir: backend
+    envVars:
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://sketch-trench-game.vercel.app
+      - key: PORT
+        value: 8080
