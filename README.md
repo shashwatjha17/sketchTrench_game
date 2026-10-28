@@ -38,10 +38,9 @@ cd frontend && npm install && npm run dev # :5173, proxies /api and /ws to backe
 
 Create a guest profile in the UI, then create a room in the lobby. No accounts required.
 
-## Tests
+## Build check
 
 ```bash
-cd backend && ./mvnw test
 cd frontend && npm run build   # typecheck + production build
 ```
 
