@@ -128,6 +128,23 @@ export default function GamePage() {
     [],
   );
 
+  // socket dropped and came back: resync the round instead of trusting stale local state
+  useEffect(() => {
+    if (!session) return;
+    // if the socket isn't up yet, its first connect is covered by the mount-time fetch above
+    let skipNext = stomp.status !== 'connected';
+    return stomp.onConnect(() => {
+      if (skipNext) {
+        skipNext = false;
+        return;
+      }
+      guestApi
+        .state(session.playerId, roomId)
+        .then((st) => st.active && applyGameState(st))
+        .catch(() => {});
+    });
+  }, [session, roomId, applyGameState]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);

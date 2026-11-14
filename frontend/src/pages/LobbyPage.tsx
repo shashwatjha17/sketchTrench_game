@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { guestApi } from '../api';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { guestApi, pingBackend } from '../api';
 import { ApiError } from '../api';
 import { createGuestSession, resumeSession } from '../guest';
 import type { GuestSession } from '../guest';
@@ -27,6 +27,8 @@ const DEFAULT_WORDS = ['mountain', 'cactus', 'umbrella', 'rocket'];
 
 export default function LobbyPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const inviteCode = params.get('join')?.trim() ?? '';
   const [session, setSession] = useState<GuestSession | null>(null);
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState({
@@ -36,9 +38,24 @@ export default function LobbyPage() {
     avatarWig: 'none',
   });
   const [language, setLanguage] = useState('en');
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState(inviteCode);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // 'checking' → first ping in flight; 'waking' → slow (free-tier server is cold-starting)
+  const [server, setServer] = useState<'checking' | 'waking' | 'ready' | 'down'>('checking');
+
+  // Wake the backend as soon as the page opens, so it's warm by the time the player
+  // has picked a nickname. If it's slow, tell them why instead of looking broken.
+  useEffect(() => {
+    let done = false;
+    const slow = setTimeout(() => !done && setServer('waking'), 1500);
+    pingBackend().then((ok) => {
+      done = true;
+      clearTimeout(slow);
+      setServer(ok ? 'ready' : 'down');
+    });
+    return () => clearTimeout(slow);
+  }, []);
 
   // restore a stored session (refresh) — jump back into the room if still live
   useEffect(() => {
@@ -85,8 +102,33 @@ export default function LobbyPage() {
     }
   };
 
-  const onPlay = (e: FormEvent) => {
+  /** Public play: join an open public room if there is one, otherwise host a new one. */
+  const onPlay = async (e: FormEvent) => {
     e.preventDefault();
+    if (inviteCode) return joinByCode();
+    setError('');
+    setBusy(true);
+    try {
+      const s = await ensureSession();
+      const open = (await guestApi.listRooms())
+        .filter((r) => !r.isPrivate && r.status === 'WAITING' && r.playerCount < r.maxPlayers)
+        .sort((a, b) => b.playerCount - a.playerCount);
+      for (const r of open) {
+        try {
+          const room = await guestApi.joinRoom(s.playerId, r.roomId);
+          setSession(s);
+          navigate(`/rooms/${room.roomId}`);
+          return;
+        } catch {
+          /* filled up or started in the meantime — try the next one */
+        }
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not reach the game server');
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
     enterRoom(false);
   };
 
@@ -110,10 +152,10 @@ export default function LobbyPage() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-12 px-4 py-10 sm:px-8">
       {/* HERO */}
-      <section className="relative overflow-hidden rounded-[2rem] border-2 border-amber-200 bg-white px-6 py-16 text-center shadow-lg shadow-amber-100">
+      <section className="relative overflow-hidden rounded-[2rem] border-2 border-amber-200 bg-white px-3 py-12 text-center sm:px-6 sm:py-16 shadow-lg shadow-amber-100">
         <DoodleScatter count={12} minSize={20} maxSize={100} />
-        <div className="relative z-10">
-          <h1 className="text-5xl font-extrabold tracking-tight sm:text-6xl">
+        <div className="relative z-10 mx-auto max-w-2xl rounded-3xl bg-white/85 px-2 py-4 sm:px-4 backdrop-blur-[2px]">
+          <h1 className="text-4xl font-extrabold tracking-tight min-[400px]:text-5xl sm:text-6xl">
             {WORDMARK.split('').map((c, i) => (
               <span key={i} style={{ color: WORDMARK_COLORS[i % WORDMARK_COLORS.length] }}>
                 {c}
@@ -133,6 +175,22 @@ export default function LobbyPage() {
             <Avatar avatar={avatar} size={96} className="rounded-full ring-4 ring-[#6d5dfc]/20" />
           </div>
 
+          {inviteCode && (
+            <p className="rounded-xl bg-[#6d5dfc]/10 px-3 py-2 text-center text-sm font-semibold text-[#6d5dfc]">
+              🎉 You're invited to room <span className="font-mono">{inviteCode}</span> — pick a nickname and hit Play!
+            </p>
+          )}
+          {server === 'waking' && (
+            <p role="status" className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-amber-700 border-t-transparent" />
+              Waking up the game server — the first visit can take up to a minute.
+            </p>
+          )}
+          {server === 'down' && (
+            <p role="alert" className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">
+              Can't reach the game server right now. Please try again in a minute.
+            </p>
+          )}
           {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-500">{error}</p>}
 
           <label className="block text-sm font-semibold text-slate-600">
@@ -227,7 +285,7 @@ export default function LobbyPage() {
               disabled={busy || !nickname.trim()}
               className="animate-play-pulse w-full rounded-full bg-green-500 px-4 py-3 text-xl font-bold text-white shadow-lg shadow-green-200 transition hover:scale-[1.02] hover:bg-green-400 disabled:opacity-50"
             >
-              ▶ Play
+              {busy ? (server === 'ready' ? 'Joining…' : 'Waking server…') : inviteCode ? '▶ Join room' : '▶ Play'}
             </button>
             <button
               type="button"
@@ -243,6 +301,7 @@ export default function LobbyPage() {
             <input
               className="input !py-2 text-center font-mono"
               placeholder="Room code"
+              aria-label="Room code"
               value={roomCode}
               onChange={(e) => setRoomCode(e.target.value)}
               maxLength={8}
@@ -271,6 +330,39 @@ export default function LobbyPage() {
         </p>
       </div>
     </section>
+
+      {/* HOW TO PLAY */}
+      <section className="rounded-[2rem] border-2 border-amber-100 bg-white p-6 shadow-lg shadow-amber-100 sm:p-8">
+        <h2 className="text-center text-2xl font-extrabold text-slate-700">How to play</h2>
+        <ol className="mt-6 grid gap-4 sm:grid-cols-3">
+          {[
+            ['✏️', 'Draw', 'Each round one player picks a word and sketches it on the chalkboard — no letters allowed!'],
+            ['💬', 'Guess', 'Everyone else types guesses in the chat. The faster you get it, the more points you earn.'],
+            ['🏆', 'Win', 'The drawer scores for every correct guess. Most points after all rounds wins.'],
+          ].map(([icon, title, text]) => (
+            <li key={title} className="rounded-2xl bg-amber-50/60 p-4 text-center">
+              <div className="text-3xl" aria-hidden>{icon}</div>
+              <h3 className="mt-2 font-bold text-slate-700">{title}</h3>
+              <p className="mt-1 text-sm text-slate-500">{text}</p>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-5 text-center text-sm text-slate-400">
+          Playing with friends? Create a private room and share the invite link.
+        </p>
+      </section>
+
+      <footer className="pb-4 text-center text-sm text-slate-400">
+        Built by Shashwat Jha ·{' '}
+        <a
+          className="font-semibold text-[#6d5dfc] hover:underline"
+          href="https://github.com/shashwatjha17/sketchTrench_game"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Source on GitHub
+        </a>
+      </footer>
     </div>
   );
 }
@@ -283,11 +375,20 @@ function DoodleScatter({ count, minSize, maxSize }: { count: number; minSize: nu
       seed = (seed * 1664525 + 1013904223) >>> 0;
       return seed / 0xffffffff;
     };
+    // keep doodles near the edges so they never sit on top of the title / tagline
+    const edgePos = () => {
+      let left = 0;
+      let top = 0;
+      do {
+        left = rnd() * 95;
+        top = rnd() * 90;
+      } while (left > 12 && left < 80 && top > 8 && top < 75);
+      return { left, top };
+    };
     return Array.from({ length: count }, (_, i) => ({
       id: i,
       size: minSize + rnd() * (maxSize - minSize),
-      left: rnd() * 100,
-      top: rnd() * 100,
+      ...edgePos(),
       rotate: (rnd() - 0.5) * 28,
       delay: rnd() * 2,
       duration: 1.2 + rnd() * 2,

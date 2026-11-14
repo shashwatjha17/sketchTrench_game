@@ -9,6 +9,24 @@ import type {
 const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
 export const BACKEND_URL = BASE_URL || (import.meta.env.PROD ? 'https://sketchtrench-backend.onrender.com' : '');
 
+/**
+ * Pings the backend's health endpoint. The free Render instance sleeps when idle and takes
+ * ~30-60s to wake, so the lobby calls this on load to start the wake-up early and to know
+ * whether to show a "waking up" notice. Resolves true once the server answers.
+ */
+export async function pingBackend(timeoutMs = 90000): Promise<boolean> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BACKEND_URL}/actuator/health`, { signal: ctrl.signal, cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;

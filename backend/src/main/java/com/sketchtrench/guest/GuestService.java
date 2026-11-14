@@ -330,21 +330,36 @@ public class GuestService {
 
     // ---- presence / cleanup ----
 
-    /** Called when a WebSocket session dies. Marks the player away and reaps them after TTL. */
-    public void onDisconnect(String sessionId) {
-        String playerId = wsSessions.playerForSession(sessionId);
-        if (playerId == null) return;
-        wsSessions.unbind(sessionId);
+    /** A socket for this player finished its STOMP handshake: mark present and tell the room. */
+    public void onConnect(String playerId) {
         GuestPlayer player = players.get(playerId);
         if (player == null) return;
+        player.isConnected = true;
+        broadcastPresence(player);
+    }
+
+    /** A WebSocket session died. Marks the player away (if it was their last socket) and reaps them after TTL. */
+    public void onDisconnect(String sessionId) {
+        String playerId = wsSessions.unbind(sessionId);
+        if (playerId == null) return;
+        GuestPlayer player = players.get(playerId);
+        if (player == null) return;
+        // another tab / a newer reconnect is still live — the player hasn't gone anywhere
+        if (wsSessions.isConnected(playerId)) return;
         player.isConnected = false;
+        broadcastPresence(player);
         scheduler.schedule(() -> reapIfStillAway(player), Instant.now().plusSeconds(DISCONNECT_TTL_SECONDS));
     }
 
     private void reapIfStillAway(GuestPlayer player) {
-        if (player.isConnected) return;
+        if (player.isConnected || wsSessions.isConnected(player.playerId)) return;
         players.remove(player);
         leaveRoom(player);
+    }
+
+    private void broadcastPresence(GuestPlayer player) {
+        GameRoom room = player.roomId == null ? null : rooms.get(player.roomId);
+        if (room != null) broadcastRoom(room);
     }
 
     private void cancelRoundTasks(GameRoom room) {

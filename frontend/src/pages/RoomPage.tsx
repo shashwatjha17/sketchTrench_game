@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { guestApi } from '../api';
 import { ApiError } from '../api';
-import { stomp } from '../ws';
+import { stomp, useConnectionStatus } from '../ws';
 import { loadSession, connectWS } from '../guest';
 import Avatar from '../components/Avatar';
 import Canvas from '../components/Canvas';
@@ -19,16 +19,25 @@ export default function RoomPage() {
   const [busy, setBusy] = useState(false);
   const [wordInput, setWordInput] = useState('');
   const [wordError, setWordError] = useState('');
+  const [copied, setCopied] = useState(false);
+  const wsStatus = useConnectionStatus();
 
   useEffect(() => {
-    if (!session) navigate('/', { replace: true });
+    // opened an invite link without a session: pick a nickname first, then auto-join
+    if (!session) navigate(`/?join=${encodeURIComponent(roomId)}`, { replace: true });
     else connectWS();
   }, [session, navigate]);
 
   const load = useCallback(async () => {
     if (!session) return;
     try {
-      setRoom(await guestApi.getRoom(roomId));
+      let info = await guestApi.getRoom(roomId);
+      // arrived via invite link with an existing session but not in this room yet → join it
+      if (!info.players.some((p) => p.playerId === session.playerId) && info.status === 'WAITING') {
+        info = await guestApi.joinRoom(session.playerId, roomId);
+      }
+      setRoom(info);
+      setError('');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Room not found');
     }
@@ -37,6 +46,20 @@ export default function RoomPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // after every (re)connect, refetch: presence/joins broadcast while offline were missed
+  useEffect(() => stomp.onConnect(() => void load()), [load]);
+
+  const inviteLink = `${window.location.origin}/rooms/${roomId}`;
+  const copyInvite = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt('Copy this invite link:', inviteLink);
+    }
+  };
 
   useEffect(() => {
     const unsub = stomp.subscribe(`/topic/room/${roomId}`, (payload) => {
@@ -105,7 +128,6 @@ export default function RoomPage() {
   if (error && !room) return <p className="text-red-500">{error}</p>;
   if (!room) return <p className="text-slate-400">Loading room…</p>;
 
-  const me = room.players.find((p) => p.playerId === session.playerId);
   const amHost = room.hostId === session.playerId;
 
   return (
@@ -136,7 +158,15 @@ export default function RoomPage() {
                     {p.isHost && <span className="ml-2 text-xs text-amber-500">HOST</span>}
                     {p.playerId === session.playerId && <span className="ml-2 text-xs text-[#6d5dfc]">you</span>}
                   </p>
-                  <p className="text-xs text-slate-400">{p.isConnected ? 'connected' : 'away'}</p>
+                  <p className="text-xs text-slate-400">
+                    {p.playerId === session.playerId
+                      ? wsStatus === 'connected'
+                        ? 'connected'
+                        : 'connecting…'
+                      : p.isConnected
+                        ? 'connected'
+                        : 'away'}
+                  </p>
                 </div>
               </div>
               <span className="font-semibold text-slate-500">{p.score} pts</span>
@@ -184,8 +214,11 @@ export default function RoomPage() {
       </section>
 
       <aside className="space-y-3">
+        <button className="btn-ghost w-full" onClick={copyInvite}>
+          {copied ? '✓ Link copied!' : '🔗 Copy invite link'}
+        </button>
         {amHost && (
-          <button className="btn w-full" disabled={busy || room.players.length < 2} onClick={() => act(() => guestApi.startGame(session.playerId, room.roomId))}>
+          <button className="btn w-full" disabled={busy || room.players.length < 2 || wsStatus !== 'connected'} onClick={() => act(() => guestApi.startGame(session.playerId, room.roomId))}>
             Start game
           </button>
         )}
@@ -193,7 +226,7 @@ export default function RoomPage() {
           Leave room
         </button>
         <p className="text-xs text-slate-500">
-          {me?.isConnected ? 'You are connected.' : 'Reconnect to rejoin.'}
+          {wsStatus === 'connected' ? 'You are connected.' : 'Connecting to the game server…'}
           {' '}{room.players.length >= 2 ? 'All set — host can start.' : 'Need at least 2 players to start.'}
         </p>
       </aside>

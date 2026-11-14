@@ -39,12 +39,9 @@ public class GuestChannelInterceptor implements ChannelInterceptor {
             authenticate(accessor);
         } else if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
             authorizeSubscribe(accessor);
-        } else if (StompCommand.DISCONNECT.equals(accessor.getCommand())) {
-            String sessionId = accessor.getSessionId();
-            if (sessionId != null) {
-                sessionManager.unbind(sessionId);
-            }
         }
+        // DISCONNECT is handled by GuestPresenceListener (SessionDisconnectEvent fires for both
+        // clean and dropped sockets) — unbinding here too made clean disconnects skip "away".
         return message;
     }
 
