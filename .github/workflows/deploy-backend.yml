@@ -1,0 +1,56 @@
+name: Deploy backend
+
+# Triggers a Render deploy of the backend after CI passes on main, so merged backend
+# changes always reach production (Render's own auto-deploy had silently stopped).
+# Needs the repo secret RENDER_DEPLOY_HOOK: Render dashboard → sketchtrench-backend →
+# Settings → Deploy Hook → copy the URL → GitHub repo → Settings → Secrets and
+# variables → Actions → New repository secret.
+#
+# Frontend-only merges are skipped: a backend redeploy wipes every in-memory room.
+# Run it by hand from the Actions tab (workflow_dispatch) to force a deploy.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+
+      - name: Did the backend change?
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; echo "Manual run: deploying."
+          elif git diff --quiet HEAD~1 HEAD -- backend/ render.yaml; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "No backend changes in this push: skipping deploy."
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; git diff --stat HEAD~1 HEAD -- backend/ render.yaml
+          fi
+
+      - name: Trigger Render deploy
+        if: steps.changes.outputs.deploy == 'true'
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::Repository secret RENDER_DEPLOY_HOOK is not set — see the comment at the top of this workflow."
+            exit 1
+          fi
+          curl -fsS --max-time 30 -X POST "$HOOK" > /dev/null
+          echo "Render deploy triggered for $(git rev-parse --short HEAD). It takes ~5-10 min; watch the service's Events tab on Render."
