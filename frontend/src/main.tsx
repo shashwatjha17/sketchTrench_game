@@ -6,6 +6,7 @@ import './index.css';
 import LobbyPage from './pages/LobbyPage';
 import GamePage from './pages/GamePage';
 import RoomPage from './pages/RoomPage';
+import ConnectionBanner from './components/ConnectionBanner';
 
 function AppRoutes() {
   return (
@@ -21,6 +22,7 @@ function AppRoutes() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
+      <ConnectionBanner />
       <AppRoutes />
     </BrowserRouter>
   </React.StrictMode>,

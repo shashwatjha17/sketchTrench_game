@@ -21,6 +21,8 @@ public class GuestPlayer {
     public volatile boolean isHost;
     public volatile boolean isDrawing;
     public volatile boolean isConnected;
+    /** Server-side bot: lives only inside its room, guesses but never draws. */
+    public volatile boolean isBot;
     public volatile String wsSessionId;
 
     public GuestPlayer(String nickname, String avatarColor, String avatarExpression,

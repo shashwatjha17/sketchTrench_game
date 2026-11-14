@@ -25,7 +25,13 @@ export interface ClearEvent {
   type: 'clear';
 }
 
-export type DrawEvent = PathEvent | FillEvent | ClearEvent;
+export interface UndoEvent {
+  type: 'undo';
+}
+
+/** Board events that change pixels (kept in the history / replay log). */
+export type BoardEvent = PathEvent | FillEvent | ClearEvent;
+export type DrawEvent = BoardEvent | UndoEvent;
 
 export interface Stroke {
   type: 'path';
@@ -35,6 +41,11 @@ export interface Stroke {
 }
 
 const BACKGROUND = '#1e3a34';
+/** Logical drawing width. All coordinates (local + broadcast) live in this space, so every
+ *  client agrees on positions regardless of its screen; the backing store is scaled up. */
+const LOGICAL_WIDTH = 900;
+const FILL_TOLERANCE = 48;
+const MAX_HISTORY = 3000;
 const BRUSH_SIZES = [3, 6, 12, 20];
 const ERASER_SIZE = 24;
 
@@ -45,7 +56,8 @@ interface CanvasProps {
   roomId?: string;
   readOnly?: boolean;
   height?: number;
-  initialStrokes?: Stroke[];
+  /** Events to replay on mount (late join / refresh). Older servers sent paths only. */
+  initialStrokes?: BoardEvent[];
 }
 
 /**
@@ -63,6 +75,14 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
   const [tool, setTool] = useState<Tool>('brush');
   const [color, setColor] = useState('#ffffff');
   const [size, setSize] = useState(6);
+  // backing-store pixels per logical pixel (≥1, ≤3); set once on mount from DPR + display size
+  const scaleRef = useRef(1);
+  // everything drawn so far, in order — undo pops the last event and replays the rest
+  const historyRef = useRef<BoardEvent[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  // read inside the long-lived socket subscription, so it must not be a stale closure value
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
   const publish = (payload: DrawEvent) => {
     if (roomId) stomp.publish(`/app/guest/drawing/${roomId}`, payload);
@@ -71,13 +91,14 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
   useEffect(() => {
     if (!roomId) return;
     const unsub = stomp.subscribe(`/topic/drawing/${roomId}`, (payload) => {
+      // the server echoes the drawer's own events back; the drawer already applied them
+      if (!readOnlyRef.current) return;
       const msg = payload as DrawEvent;
-      if (msg.type === 'clear') {
-        clearCanvas();
-      } else if (msg.type === 'fill') {
-        fillAt(msg.x, msg.y, msg.color);
-      } else if (msg.type === 'path') {
-        drawPath(msg);
+      if (msg.type === 'undo') {
+        undoLocal();
+      } else if (msg.type === 'clear' || msg.type === 'fill' || msg.type === 'path') {
+        applyEvent(msg);
+        record(msg);
       }
     });
     return unsub;
@@ -86,12 +107,41 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
 
   const ctx = () => canvasRef.current?.getContext('2d');
 
+  const applyEvent = (ev: BoardEvent) => {
+    if (ev.type === 'clear') clearCanvas();
+    else if (ev.type === 'fill') fillAt(ev.x, ev.y, ev.color);
+    else if (ev.type === 'path') drawPath(ev);
+  };
+
+  const record = (ev: BoardEvent) => {
+    const h = historyRef.current;
+    h.push(ev);
+    if (h.length > MAX_HISTORY) h.shift();
+    setCanUndo(true);
+  };
+
+  /** Drop the last event and redraw everything else from scratch. */
+  const undoLocal = () => {
+    const h = historyRef.current;
+    if (h.length === 0) return false;
+    h.pop();
+    clearCanvas();
+    h.forEach(applyEvent);
+    setCanUndo(h.length > 0);
+    return true;
+  };
+
+  const undo = () => {
+    if (readOnly) return;
+    if (undoLocal()) publish({ type: 'undo' } satisfies UndoEvent);
+  };
+
   const clearCanvas = () => {
     const c = canvasRef.current;
     const g = ctx();
     if (!c || !g) return;
     g.fillStyle = BACKGROUND;
-    g.fillRect(0, 0, c.width, c.height);
+    g.fillRect(0, 0, LOGICAL_WIDTH, height);
   };
 
   const drawPath = (stroke: Stroke) => {
@@ -107,14 +157,17 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
     g.stroke();
   };
 
-  /** Bucket fill: BFS over the pixel buffer, replacing the clicked color region.
-   *  A tolerance absorbs anti-aliased stroke edges so fills don't silently stall. */
-  const fillAt = (x: number, y: number, fillColor: string, tol = 12) => {
+  /** Bucket fill over the device-pixel buffer. (x, y) are logical coordinates.
+   *  A generous tolerance swallows most anti-aliased stroke edges, and a 1px grow pass
+   *  paints the remaining blended ring so no grey halo is left around lines. */
+  const fillAt = (lx: number, ly: number, fillColor: string, tol = FILL_TOLERANCE) => {
     const c = canvasRef.current;
     const g = ctx();
     if (!c || !g) return;
     const w = c.width;
     const h = c.height;
+    const x = Math.floor(lx * scaleRef.current);
+    const y = Math.floor(ly * scaleRef.current);
     if (x < 0 || x >= w || y < 0 || y >= h) return;
     const img = g.getImageData(0, 0, w, h);
     const data = img.data;
@@ -123,33 +176,45 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
     const sr = data[start];
     const sg = data[start + 1];
     const sb = data[start + 2];
+    if (Math.abs(sr - tr) <= 2 && Math.abs(sg - tg) <= 2 && Math.abs(sb - tb) <= 2) return;
     const close = (i: number) =>
       Math.abs(data[i] - sr) <= tol && Math.abs(data[i + 1] - sg) <= tol && Math.abs(data[i + 2] - sb) <= tol;
-    if (close(start) && Math.abs(sr - tr) <= tol && Math.abs(sg - tg) <= tol && Math.abs(sb - tb) <= tol) return;
-    const stack: number[] = [x, y];
-    let guard = 0;
-    while (stack.length > 0 && guard < w * h * 4) {
-      guard++;
-      const cy = stack.pop()!;
-      const cx = stack.pop()!;
-      const i = (cy * w + cx) * 4;
+    const filled = new Uint8Array(w * h);
+    const stack: number[] = [y * w + x];
+    while (stack.length > 0) {
+      const p = stack.pop()!;
+      if (filled[p]) continue;
+      const i = p * 4;
       if (!close(i)) continue;
+      filled[p] = 1;
+      const px = p % w;
+      if (px > 0) stack.push(p - 1);
+      if (px < w - 1) stack.push(p + 1);
+      if (p >= w) stack.push(p - w);
+      if (p < w * (h - 1)) stack.push(p + w);
+    }
+    const paint = (p: number) => {
+      const i = p * 4;
       data[i] = tr;
       data[i + 1] = tg;
       data[i + 2] = tb;
       data[i + 3] = 255;
-      if (cx > 0) stack.push(cx - 1, cy);
-      if (cx < w - 1) stack.push(cx + 1, cy);
-      if (cy > 0) stack.push(cx, cy - 1);
-      if (cy < h - 1) stack.push(cx, cy + 1);
+    };
+    // grow by one pixel into the anti-aliased border, then paint the region
+    for (let p = 0; p < filled.length; p++) {
+      if (filled[p] !== 1) continue;
+      const px = p % w;
+      const n = [px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < w * (h - 1) ? p + w : -1];
+      for (const q of n) if (q >= 0 && filled[q] === 0) filled[q] = 2;
     }
+    for (let p = 0; p < filled.length; p++) if (filled[p]) paint(p);
     g.putImageData(img, 0, 0);
   };
 
   const localPos = (e: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const rect = canvasRef.current!.getBoundingClientRect();
-    const scaleX = canvasRef.current!.width / rect.width;
-    const scaleY = canvasRef.current!.height / rect.height;
+    const scaleX = LOGICAL_WIDTH / rect.width;
+    const scaleY = height / rect.height;
     return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
   };
 
@@ -159,8 +224,10 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
     if (tool === 'fill') {
       const p = localPos(e);
       const strokeColor = color;
-      fillAt(Math.round(p.x), Math.round(p.y), strokeColor);
-      publish({ type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color: strokeColor } satisfies FillEvent);
+      const ev: FillEvent = { type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color: strokeColor };
+      fillAt(ev.x, ev.y, ev.color);
+      record(ev);
+      publish(ev);
       drawingRef.current = true;
       lastFill.current = p;
       return;
@@ -176,8 +243,10 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
       // paint-fill: keep flooding along the drag path (throttled by distance)
       const last = lastFill.current;
       if (Math.hypot(p.x - last.x, p.y - last.y) > 40) {
-        fillAt(Math.round(p.x), Math.round(p.y), color);
-        publish({ type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color } satisfies FillEvent);
+        const ev: FillEvent = { type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color };
+        fillAt(ev.x, ev.y, ev.color);
+        record(ev);
+        publish(ev);
         lastFill.current = p;
       }
       return;
@@ -201,24 +270,59 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
     if (!drawingRef.current) return;
     drawingRef.current = false;
     if (currentStroke.current.length > 1) {
-      publish({
+      const ev: PathEvent = {
         type: 'path',
         points: currentStroke.current,
         color: tool === 'eraser' ? BACKGROUND : color,
         size: tool === 'eraser' ? ERASER_SIZE : size,
-      } satisfies PathEvent);
+      };
+      record(ev);
+      publish(ev);
     }
     currentStroke.current = [];
   };
 
   const onClear = () => {
     clearCanvas();
-    publish({ type: 'clear' } satisfies ClearEvent);
+    const ev: ClearEvent = { type: 'clear' };
+    record(ev);
+    publish(ev);
   };
 
+  // Ctrl/Cmd+Z undoes, unless you're typing in a text field (e.g. the chat)
   useEffect(() => {
+    if (readOnly) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      undo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly]);
+
+  useEffect(() => {
+    // size the backing store for the device's pixel density so lines stay crisp on
+    // retina / HiDPI screens; drawing code keeps using logical coordinates via the transform
+    const c = canvasRef.current;
+    if (c) {
+      const cssWidth = c.getBoundingClientRect().width || LOGICAL_WIDTH;
+      const scale = Math.min(3, Math.max(1, (cssWidth * (window.devicePixelRatio || 1)) / LOGICAL_WIDTH));
+      scaleRef.current = scale;
+      c.width = Math.round(LOGICAL_WIDTH * scale);
+      c.height = Math.round(height * scale);
+      c.getContext('2d')?.setTransform(scale, 0, 0, scale, 0, 0);
+    }
     clearCanvas();
-    initialStrokes?.forEach((s) => s.points.length > 1 && drawPath(s));
+    historyRef.current = [];
+    initialStrokes?.forEach((ev) => {
+      if (ev.type === 'path' && ev.points.length < 2) return;
+      applyEvent(ev);
+      record(ev);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -227,7 +331,7 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
       <div className="overflow-hidden rounded-md">
         <canvas
           ref={canvasRef}
-          width={900}
+          width={LOGICAL_WIDTH}
           height={height}
           onPointerDown={onDown}
           onPointerMove={onMove}
@@ -269,7 +373,15 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
             </div>
           )}
           <button
-            className="ml-auto rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-red-500"
+            className="ml-auto rounded-full bg-[#6b421f] px-3 py-1 text-xs font-bold text-amber-50 transition hover:bg-[#5d391a] disabled:opacity-40"
+            onClick={undo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+          >
+            ↶ Undo
+          </button>
+          <button
+            className="rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-red-500"
             onClick={onClear}
           >
             Clear

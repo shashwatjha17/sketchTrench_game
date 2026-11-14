@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 
 /** One in-memory room and its live game state. No persistence anywhere. */
@@ -34,6 +36,12 @@ public class GameRoom {
     public volatile ScheduledFuture<?> endRoundTask;
     public volatile ScheduledFuture<?> tickerTask;
     public volatile Instant startedAt;
+    /** Scheduled bot guesses/chatter for the current round; cancelled when the round ends. */
+    public final List<ScheduledFuture<?>> botTasks = new ArrayList<>();
+
+    // moderation: target playerId -> voters, and players kicked from this room
+    public final Map<String, Set<String>> kickVotes = new ConcurrentHashMap<>();
+    public final Set<String> banned = ConcurrentHashMap.newKeySet();
 
     public GameRoom(String roomId, String name, boolean isPrivate, int maxPlayers,
                     int totalRounds, int drawingTimeSec, boolean customWordsEnabled) {
@@ -57,5 +65,10 @@ public class GameRoom {
 
     public List<GuestPlayer> orderedPlayers() {
         return players.values().stream().toList();
+    }
+
+    /** Real players only (bots excluded) — drawers, hosts and kick electorates come from here. */
+    public List<GuestPlayer> humanPlayers() {
+        return players.values().stream().filter(p -> !p.isBot).toList();
     }
 }
