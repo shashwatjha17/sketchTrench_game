@@ -103,6 +103,13 @@ public class GuestController {
         return service.getRoom(roomId);
     }
 
+    @PostMapping("/rooms/{roomId}/settings")
+    public GuestDto.RoomInfo updateSettings(@RequestHeader(PLAYER_HEADER) String playerId,
+                                            @PathVariable String roomId,
+                                            @RequestBody GuestDto.SettingsRequest req) {
+        return service.updateSettings(requirePlayer(playerId), roomId, req);
+    }
+
     // ---- bots & moderation ----
 
     @PostMapping("/rooms/{roomId}/bots")

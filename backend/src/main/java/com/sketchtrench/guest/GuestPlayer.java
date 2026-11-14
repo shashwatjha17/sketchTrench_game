@@ -24,6 +24,8 @@ public class GuestPlayer {
     /** Server-side bot: lives only inside its room, guesses but never draws. */
     public volatile boolean isBot;
     public volatile String wsSessionId;
+    /** chat flood guard: 5 messages per 4 seconds */
+    public final RateLimiter chatLimiter = new RateLimiter(5, 4000);
 
     public GuestPlayer(String nickname, String avatarColor, String avatarExpression,
                        boolean avatarSunglasses, String avatarWig, String language) {

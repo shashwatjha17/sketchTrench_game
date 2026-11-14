@@ -14,7 +14,7 @@ export default function Avatar({
   size?: number;
   className?: string;
 }) {
-  const color = avatar.avatarColor ?? '#6d5dfc';
+  const color = avatar.avatarColor ?? '#ffd23f';
   const expression = avatar.avatarExpression ?? 'happy';
   const sunglasses = avatar.avatarSunglasses ?? false;
   const wig = avatar.avatarWig ?? 'none';
@@ -70,7 +70,7 @@ export default function Avatar({
       aria-label="avatar"
     >
       {/* face */}
-      <circle cx="25" cy="26" r="19" fill={color} stroke="#00000018" strokeWidth="1" />
+      <circle cx="25" cy="26" r="19" fill={color} stroke="#1f1d1a" strokeWidth="2" />
 
       {/* wig fringe on top of the head */}
       {wig === 'curly' && (

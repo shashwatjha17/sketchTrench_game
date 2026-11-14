@@ -4,17 +4,33 @@ export default {
   theme: {
     extend: {
       colors: {
+        // sketchbook palette: paper, ink, and one highlighter accent
+        paper: {
+          DEFAULT: '#fbf8f1',
+          deep: '#f2ecdf',
+          line: '#e6dfcf',
+        },
         ink: {
-          950: '#0a0a0f',
-          900: '#12121a',
-          800: '#1a1a24',
-          700: '#24242f',
-          600: '#32323f',
+          DEFAULT: '#1f1d1a',
+          soft: '#57534e',
+          faint: '#8a847b',
         },
-        accent: {
-          DEFAULT: '#6d5dfc',
-          light: '#8b7dff',
+        marker: {
+          DEFAULT: '#ffd23f',
+          deep: '#f5b700',
+          soft: '#fff1b8',
         },
+        go: '#2f9e44',
+        stop: '#e03131',
+      },
+      fontFamily: {
+        hand: ['"Patrick Hand"', 'ui-rounded', 'system-ui', 'sans-serif'],
+        sans: ['Nunito', 'ui-rounded', 'system-ui', 'sans-serif'],
+      },
+      boxShadow: {
+        sketch: '4px 4px 0 0 #1f1d1a',
+        'sketch-sm': '2px 2px 0 0 #1f1d1a',
+        'sketch-lg': '6px 6px 0 0 #1f1d1a',
       },
     },
   },

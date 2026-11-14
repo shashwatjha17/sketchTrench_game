@@ -1,0 +1,78 @@
+# Words censored in chat and refused in nicknames / room names.
+# Matching is case-, accent- and leetspeak-insensitive (f4ck, sh1t, fuuuck...).
+# Prefix a line with * to also match it inside longer words (only for roots that
+# don't appear inside ordinary words).
+*fuck
+*shit
+*bitch
+*nigger
+*nigga
+*faggot
+*whore
+*slut
+*wank
+*bastard
+*retard
+*motherf
+cunt
+cock
+dick
+dicks
+pussy
+asshole
+ass
+arse
+arsehole
+twat
+prick
+bollocks
+piss
+pissed
+crap
+damn
+douche
+douchebag
+jerkoff
+cum
+porn
+rape
+rapist
+nazi
+hitler
+kys
+dildo
+tits
+boobs
+fag
+fags
+dyke
+tranny
+spic
+chink
+kike
+wetback
+# de
+scheiße
+scheisse
+arschloch
+fotze
+hure
+wichser
+schlampe
+# fr
+merde
+putain
+salope
+connard
+connasse
+enculé
+pute
+# es
+mierda
+puta
+puto
+cabrón
+coño
+pendejo
+gilipollas
+joder

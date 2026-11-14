@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { Eraser, PaintBucket, Pencil, Trash2, Undo2 } from 'lucide-react';
 import { stomp } from '../ws';
 
 interface Point {
@@ -40,7 +41,11 @@ export interface Stroke {
   size: number;
 }
 
-const BACKGROUND = '#1e3a34';
+const BACKGROUND = '#ffffff';
+const PALETTE = [
+  '#1f1d1a', '#8a847b', '#ffffff', '#e03131', '#f76707', '#ffd23f',
+  '#2f9e44', '#1098ad', '#1c7ed6', '#7048e8', '#e64980', '#8d5524',
+];
 /** Logical drawing width. All coordinates (local + broadcast) live in this space, so every
  *  client agrees on positions regardless of its screen; the backing store is scaled up. */
 const LOGICAL_WIDTH = 900;
@@ -61,7 +66,7 @@ interface CanvasProps {
 }
 
 /**
- * Chalkboard drawing surface. With a roomId it's the shared board (strokes sent over
+ * Paper drawing surface. With a roomId it's the shared board (strokes sent over
  * /topic/drawing/{id}, rendered on every client); without one it's a local doodle pad
  * for the landing/room pages. Tools: brush (sizes + full color spectrum), eraser,
  * paint-bucket fill, clear all. Eraser/fill/clear broadcast live but only paths are
@@ -73,7 +78,7 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
   const currentStroke = useRef<Point[]>([]);
   const lastFill = useRef<Point>({ x: 0, y: 0 });
   const [tool, setTool] = useState<Tool>('brush');
-  const [color, setColor] = useState('#ffffff');
+  const [color, setColor] = useState('#1f1d1a');
   const [size, setSize] = useState(6);
   // backing-store pixels per logical pixel (≥1, ≤3); set once on mount from DPR + display size
   const scaleRef = useRef(1);
@@ -327,78 +332,123 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
   }, []);
 
   return (
-    <div className="rounded-2xl border-8 border-[#8b5a2b] bg-[#8b5a2b] p-1 shadow-xl shadow-amber-900/20">
-      <div className="overflow-hidden rounded-md">
-        <canvas
-          ref={canvasRef}
-          width={LOGICAL_WIDTH}
-          height={height}
-          onPointerDown={onDown}
-          onPointerMove={onMove}
-          onPointerUp={onUp}
-          onPointerLeave={onUp}
-          className="w-full touch-none"
-          style={{ backgroundColor: BACKGROUND, cursor: tool === 'fill' ? 'pointer' : 'crosshair' }}
-        />
-      </div>
+    <div className="sheet overflow-hidden">
+      <canvas
+        ref={canvasRef}
+        width={LOGICAL_WIDTH}
+        height={height}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerLeave={onUp}
+        className="block w-full touch-none"
+        style={{ backgroundColor: BACKGROUND, cursor: readOnly ? 'default' : tool === 'fill' ? 'cell' : 'crosshair' }}
+      />
       {!readOnly && (
-        <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md bg-[#7a4d24] px-2 py-1.5">
-          <ToolButton active={tool === 'brush'} onClick={() => setTool('brush')} label="✏️ Brush" />
-          <ToolButton active={tool === 'eraser'} onClick={() => setTool('eraser')} label="🧽 Eraser" />
-          <ToolButton active={tool === 'fill'} onClick={() => setTool('fill')} label="🪣 Fill" />
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => {
-              setColor(e.target.value);
-              setTool('brush');
-            }}
-            className="h-7 w-9 cursor-pointer rounded border-0 bg-transparent p-0"
-            aria-label="color spectrum"
-            title="Color spectrum"
-          />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t-2 border-ink bg-paper px-2.5 py-2">
+          <div className="flex gap-1" role="group" aria-label="Tools">
+            <ToolButton active={tool === 'brush'} onClick={() => setTool('brush')} label="Pencil">
+              <Pencil size={18} />
+            </ToolButton>
+            <ToolButton active={tool === 'eraser'} onClick={() => setTool('eraser')} label="Eraser">
+              <Eraser size={18} />
+            </ToolButton>
+            <ToolButton active={tool === 'fill'} onClick={() => setTool('fill')} label="Fill">
+              <PaintBucket size={18} />
+            </ToolButton>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Colours">
+            {PALETTE.map((c) => (
+              <button
+                key={c}
+                onClick={() => {
+                  setColor(c);
+                  if (tool === 'eraser') setTool('brush');
+                }}
+                className={`h-6 w-6 rounded-full border-2 transition ${
+                  color === c && tool !== 'eraser' ? 'scale-110 border-ink ring-2 ring-marker-deep ring-offset-1' : 'border-ink/60 hover:scale-110'
+                }`}
+                style={{ backgroundColor: c }}
+                aria-label={`colour ${c}`}
+                title={c}
+              />
+            ))}
+            <label
+              className="relative h-6 w-6 cursor-pointer overflow-hidden rounded-full border-2 border-ink/60"
+              title="Custom colour"
+              style={{ background: 'conic-gradient(#e03131, #ffd23f, #2f9e44, #1c7ed6, #7048e8, #e03131)' }}
+            >
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => {
+                  setColor(e.target.value);
+                  if (tool === 'eraser') setTool('brush');
+                }}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                aria-label="Custom colour"
+              />
+            </label>
+          </div>
+
           {tool === 'brush' && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1" role="group" aria-label="Brush size">
               {BRUSH_SIZES.map((s) => (
                 <button
                   key={s}
                   onClick={() => setSize(s)}
-                  className={`flex h-7 w-7 items-center justify-center rounded-full transition ${size === s ? 'bg-amber-200' : 'bg-[#6b421f] hover:bg-[#5d391a]'}`}
-                  aria-label={`brush ${s}px`}
-                  title={`${s}px brush`}
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg border-2 transition ${
+                    size === s ? 'border-ink bg-marker' : 'border-transparent hover:bg-paper-deep'
+                  }`}
+                  aria-label={`${s}px brush`}
+                  title={`${s}px`}
                 >
-                  <span className="rounded-full bg-white" style={{ width: s, height: s }} />
+                  <span className="rounded-full bg-ink" style={{ width: Math.min(s, 20), height: Math.min(s, 20) }} />
                 </button>
               ))}
             </div>
           )}
-          <button
-            className="ml-auto rounded-full bg-[#6b421f] px-3 py-1 text-xs font-bold text-amber-50 transition hover:bg-[#5d391a] disabled:opacity-40"
-            onClick={undo}
-            disabled={!canUndo}
-            title="Undo (Ctrl+Z)"
-          >
-            ↶ Undo
-          </button>
-          <button
-            className="rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-red-500"
-            onClick={onClear}
-          >
-            Clear
-          </button>
+
+          <div className="ml-auto flex gap-1">
+            <button className="icon-btn" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
+              <Undo2 size={18} />
+            </button>
+            <button
+              className="icon-btn hover:!bg-stop hover:text-white"
+              onClick={onClear}
+              title="Clear the board"
+              aria-label="Clear the board"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function ToolButton({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function ToolButton({
+  active,
+  onClick,
+  label,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  children: ReactNode;
+}) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-3 py-1 text-xs font-bold transition ${active ? 'bg-amber-200 text-slate-800' : 'bg-[#6b421f] text-amber-50 hover:bg-[#5d391a]'}`}
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      className={`icon-btn ${active ? '!bg-marker shadow-sketch-sm' : ''}`}
     >
-      {label}
+      {children}
     </button>
   );
 }

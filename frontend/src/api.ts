@@ -3,6 +3,7 @@ import type {
   GuestGameState,
   GuestRoomInfo,
   ReconnectResponse,
+  RoomSettings,
   SessionResponse,
 } from './types';
 
@@ -65,6 +66,8 @@ export interface CreateRoomInput {
   drawingTimeSec: number;
   customWords: boolean;
   customWordList?: string[];
+  language?: string;
+  hints?: boolean;
 }
 
 export const guestApi = {
@@ -100,6 +103,11 @@ export const guestApi = {
     request<GuestRoomInfo>(`/api/guest/rooms/${roomId}/words/remove`, {
       method: 'POST',
       body: JSON.stringify({ word }),
+    }, playerId),
+  updateSettings: (playerId: string, roomId: string, settings: RoomSettings) =>
+    request<GuestRoomInfo>(`/api/guest/rooms/${roomId}/settings`, {
+      method: 'POST',
+      body: JSON.stringify(settings),
     }, playerId),
   addBot: (playerId: string, roomId: string) =>
     request<GuestRoomInfo>(`/api/guest/rooms/${roomId}/bots`, { method: 'POST' }, playerId),

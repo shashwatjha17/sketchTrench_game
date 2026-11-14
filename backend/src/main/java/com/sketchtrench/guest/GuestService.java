@@ -38,7 +38,7 @@ public class GuestService {
     private static final int MAX_STORED_DRAW_EVENTS = 3000;
     private static final int MAX_BOTS = 5;
     private static final String[] BOT_NAMES = {"Pixel", "Doodle", "Scribble", "Crayon", "Inky", "Smudge", "Chalky", "Squiggle"};
-    private static final String[] BOT_COLORS = {"#ef4444", "#f97316", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"};
+    private static final String[] BOT_COLORS = {"#ff8a5b", "#ff6b6b", "#f783ac", "#b197fc", "#74c0fc", "#63e6be", "#a9e34b"};
     private static final String[] BOT_EXPRESSIONS = {"happy", "surprised", "wink"};
     private static final String[] BOT_WIGS = {"none", "curly", "bob", "spiky"};
 
@@ -53,10 +53,16 @@ public class GuestService {
     // ---- sessions ----
 
     public GuestPlayer createSession(GuestDto.SessionRequest req) {
-        if (req.nickname() == null || req.nickname().isBlank()) {
+        String nick = req.nickname() == null ? "" : req.nickname().replaceAll("\\p{C}", "").strip();
+        if (nick.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "NICKNAME_REQUIRED", "Choose a nickname");
         }
-        return players.create(req);
+        if (nick.length() > 20) nick = nick.substring(0, 20).strip();
+        if (ChatFilter.containsProfanity(nick)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "NICKNAME_NOT_ALLOWED", "That nickname isn't allowed — try another one");
+        }
+        return players.create(new GuestDto.SessionRequest(nick, req.avatarColor(), req.avatarExpression(),
+                req.avatarSunglasses(), req.avatarWig(), WordPool.normalizeLanguage(req.language())));
     }
 
     public Map<String, Object> reconnect(GuestDto.ReconnectRequest req) {
@@ -80,7 +86,7 @@ public class GuestService {
     // ---- room listing / joining ----
 
     public List<GuestDto.RoomInfo> listPublicRooms() {
-        return rooms.publicWaiting().stream().map(this::toRoomInfo).toList();
+        return rooms.publicOpen().stream().limit(50).map(this::toRoomInfo).toList();
     }
 
     public GuestDto.RoomInfo getRoom(String roomId) {
@@ -108,15 +114,23 @@ public class GuestService {
         if (room.banned.contains(player.playerId)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "KICKED", "You were removed from this room");
         }
-        if ("PLAYING".equals(room.status)) {
-            throw new ApiException(HttpStatus.CONFLICT, "GAME_IN_PROGRESS", "The game already started");
+        if ("FINISHED".equals(room.status)) {
+            throw new ApiException(HttpStatus.CONFLICT, "GAME_OVER", "That game just finished");
         }
         if (room.playerCount() >= room.maxPlayers) {
             throw new ApiException(HttpStatus.CONFLICT, "ROOM_FULL", "Room is full");
         }
+        // joining mid-game is fine: you start on 0 points and guess from the current round on;
+        // you'll get a drawing turn if the rotation reaches you before the game ends
+        player.score = 0;
+        player.isDrawing = false;
+        player.isHost = false;
         room.players.put(player.playerId, player);
         player.roomId = room.roomId;
         broadcastRoom(room);
+        if ("PLAYING".equals(room.status)) {
+            system(room, player.nickname + " joined the game");
+        }
         return toRoomInfo(room);
     }
 
@@ -214,24 +228,25 @@ public class GuestService {
             for (int i = 0; i < wrong; i++) {
                 String text = rnd.nextInt(3) == 0 && word.length() >= 4
                         ? nearMiss(word, rnd)
-                        : WordPool.pick(4).stream().filter(w -> !w.equalsIgnoreCase(word)).findFirst().orElse("hmm");
+                        : WordPool.pick(room.language, 4, Set.of()).stream().filter(w -> !w.equalsIgnoreCase(word)).findFirst().orElse("hmm");
                 long at = (long) (total * (0.1 + rnd.nextDouble() * 0.5));
-                botTask(room, round, word, at, () -> handleMessage(bot, room.roomId, text));
+                roundTask(room, round, word, at, () -> handleMessage(bot, room.roomId, text));
             }
             if (rnd.nextInt(100) < 85) {
                 long at = (long) (total * (0.25 + rnd.nextDouble() * 0.65));
-                botTask(room, round, word, at, () -> submitGuess(bot.playerId, room.roomId, word));
+                roundTask(room, round, word, at, () -> submitGuess(bot.playerId, room.roomId, word));
             }
         }
     }
 
-    private void botTask(GameRoom room, int round, String word, long delaySec, Runnable action) {
+    /** Runs {@code action} after {@code delaySec} unless the round has moved on by then. */
+    private void roundTask(GameRoom room, int round, String word, long delaySec, Runnable action) {
         ScheduledFuture<?> f = scheduler.schedule(() -> {
             if (room.roundIndex != round || !word.equals(room.word) || !"PLAYING".equals(room.status)) return;
             try {
                 action.run();
             } catch (RuntimeException e) {
-                log.debug("bot action skipped: {}", e.getMessage());
+                log.debug("round task skipped: {}", e.getMessage());
             }
         }, Instant.now().plusSeconds(Math.max(2, delaySec)));
         synchronized (room.botTasks) {
@@ -306,7 +321,8 @@ public class GuestService {
         if (words == null) return;
         for (String w : words) {
             String clean = w.trim();
-            if (!clean.isEmpty() && clean.length() <= 64) {
+            if (!clean.isEmpty() && clean.length() <= 64 && !ChatFilter.containsProfanity(clean)
+                    && room.customWords.stream().noneMatch(clean::equalsIgnoreCase) && room.customWords.size() < 200) {
                 room.customWords.add(clean);
             }
         }
@@ -320,6 +336,36 @@ public class GuestService {
         }
         room.customWords.remove(word);
         broadcastRoom(room);
+    }
+
+    // ---- settings ----
+
+    public static final int MIN_ROUNDS = 1;
+    public static final int MAX_ROUNDS = 10;
+    public static final int MIN_DRAW_SECONDS = 30;
+    public static final int MAX_DRAW_SECONDS = 240;
+    public static final int MAX_PLAYERS = 12;
+
+    /** Host tweaks the room before (or between) games. Out-of-range numbers are clamped. */
+    public GuestDto.RoomInfo updateSettings(GuestPlayer host, String roomId, GuestDto.SettingsRequest req) {
+        GameRoom room = requireRoom(roomId);
+        requireHost(host, room, "Only the host can change settings");
+        if ("PLAYING".equals(room.status)) {
+            throw new ApiException(HttpStatus.CONFLICT, "GAME_IN_PROGRESS", "Settings are locked during a game");
+        }
+        if (req.isPrivate() != null) room.isPrivate = req.isPrivate();
+        if (req.totalRounds() != null) room.totalRounds = clamp(req.totalRounds(), MIN_ROUNDS, MAX_ROUNDS);
+        if (req.drawingTimeSec() != null) room.drawingTimeSec = clamp(req.drawingTimeSec(), MIN_DRAW_SECONDS, MAX_DRAW_SECONDS);
+        if (req.maxPlayers() != null) room.maxPlayers = clamp(req.maxPlayers(), Math.max(2, room.playerCount()), MAX_PLAYERS);
+        if (req.customWords() != null) room.customWordsEnabled = req.customWords();
+        if (req.language() != null) room.language = WordPool.normalizeLanguage(req.language());
+        if (req.hints() != null) room.hintsEnabled = req.hints();
+        broadcastRoom(room);
+        return toRoomInfo(room);
+    }
+
+    static int clamp(int v, int lo, int hi) {
+        return Math.max(lo, Math.min(hi, v));
     }
 
     // ---- game flow ----
@@ -340,6 +386,8 @@ public class GuestService {
         }
         room.status = "PLAYING";
         room.roundIndex = 0;
+        room.usedWords.clear();
+        room.drewThisCycle.clear();
         room.startedAt = Instant.now();
         room.orderedPlayers().forEach(p -> {
             p.score = 0;
@@ -351,24 +399,30 @@ public class GuestService {
 
     private void beginRound(GameRoom room) {
         List<GuestPlayer> ordered = room.orderedPlayers();
-        List<GuestPlayer> humans = room.humanPlayers(); // bots guess but never draw
-        if (humans.isEmpty()) return;
-        GuestPlayer drawer = humans.get(room.roundIndex % humans.size());
+        GuestPlayer drawer = room.nextDrawer(); // bots guess but never draw
+        if (drawer == null) return;
         room.drawerId = drawer.playerId;
         room.guessed = new ArrayList<>();
         room.strokes = new ArrayList<>();
         ordered.forEach(p -> p.isDrawing = p.playerId.equals(drawer.playerId));
 
-        List<String> texts = room.customWordsEnabled && room.customWords.size() >= 3
-                ? new ArrayList<>(room.customWords)
-                : WordPool.pick(3);
-        java.util.Collections.shuffle(texts);
+        List<String> texts;
+        if (room.customWordsEnabled && room.customWords.size() >= 3) {
+            List<String> fresh = new ArrayList<>(room.customWords);
+            fresh.removeIf(w -> room.usedWords.contains(w.toLowerCase()));
+            if (fresh.size() < 3) fresh = new ArrayList<>(room.customWords);
+            java.util.Collections.shuffle(fresh);
+            texts = new ArrayList<>(fresh.subList(0, 3));
+        } else {
+            texts = new ArrayList<>(WordPool.pick(room.language, 3, room.usedWords));
+        }
         List<GuestDto.WordOption> options = new ArrayList<>();
         for (int i = 0; i < texts.size(); i++) {
             options.add(new GuestDto.WordOption(String.valueOf(i), texts.get(i)));
         }
         room.wordOptions = options;
         room.word = null;
+        room.revealed.clear();
 
         messaging.convertAndSendToUser(drawer.playerId, "/queue/word-options",
                 new GuestDto.WordOptions(room.roundIndex + 1, options));
@@ -396,17 +450,51 @@ public class GuestService {
                 .map(GuestDto.WordOption::text)
                 .orElse(room.wordOptions.isEmpty() ? null : room.wordOptions.get(0).text());
         if (room.word == null) return;
+        room.usedWords.add(room.word.toLowerCase());
+        room.revealed.clear();
         GuestPlayer drawer = room.players.get(room.drawerId);
         if (drawer == null) return; // drawer left while picking
 
         messaging.convertAndSendToUser(room.drawerId, "/queue/word", new GuestDto.SecretWord(room.word));
         broadcastToRoom(room.roomId, new GuestDto.RoundStarted(
-                room.roundIndex + 1, room.drawerId, drawer.nickname, room.drawingTimeSec));
+                room.roundIndex + 1, room.drawerId, drawer.nickname, room.drawingTimeSec, pattern(room.word, room.revealed)));
 
         room.roundEndsAt = Instant.now().plusSeconds(room.drawingTimeSec);
         scheduleTick(room);
         room.endRoundTask = scheduler.schedule(() -> endRound(room.roomId), room.roundEndsAt);
         scheduleBotGuesses(room);
+        scheduleHints(room);
+    }
+
+    /**
+     * Reveals a few letters to guessers as the clock runs down — about a third of the letters,
+     * at most 4, always leaving at least 2 hidden — spread between 35% and 80% of the round.
+     */
+    private void scheduleHints(GameRoom room) {
+        if (!room.hintsEnabled || room.word == null) return;
+        int reveals = hintCount(room.word);
+        String word = room.word;
+        int round = room.roundIndex;
+        for (int i = 0; i < reveals; i++) {
+            double at = reveals == 1 ? 0.6 : 0.35 + 0.45 * i / (reveals - 1);
+            roundTask(room, round, word, Math.round(room.drawingTimeSec * at), () -> revealLetter(room, word));
+        }
+    }
+
+    static int hintCount(String word) {
+        long letters = word.chars().filter(Character::isLetterOrDigit).count();
+        if (letters < 3) return 0;
+        return (int) Math.min(4, Math.min(letters - 2, Math.max(1, Math.round(letters / 3.0))));
+    }
+
+    private void revealLetter(GameRoom room, String word) {
+        List<Integer> hidden = new ArrayList<>();
+        for (int i = 0; i < word.length(); i++) {
+            if (Character.isLetterOrDigit(word.charAt(i)) && !room.revealed.contains(i)) hidden.add(i);
+        }
+        if (hidden.size() <= 2) return;
+        room.revealed.add(hidden.get(ThreadLocalRandom.current().nextInt(hidden.size())));
+        broadcastToRoom(room.roomId, new GuestDto.WordHint(pattern(word, room.revealed)));
     }
 
     private void scheduleTick(GameRoom room) {
@@ -450,8 +538,17 @@ public class GuestService {
     public void handleMessage(GuestPlayer player, String roomId, String text) {
         GameRoom room = rooms.get(roomId);
         if (room == null || text == null || text.isBlank() || !room.players.containsKey(player.playerId)) return;
-        String trimmed = text.trim();
+        String trimmed = text.replaceAll("\\p{C}", "").trim();
+        if (trimmed.isEmpty()) return;
         if (trimmed.length() > 200) trimmed = trimmed.substring(0, 200);
+        long now = System.currentTimeMillis();
+        if (!player.isBot && !player.chatLimiter.tryAcquire(now)) {
+            if (player.chatLimiter.shouldWarn(now)) {
+                messaging.convertAndSendToUser(player.playerId, "/queue/hint",
+                        new GuestDto.SystemMessage("Slow down — you're sending messages too fast."));
+            }
+            return;
+        }
         if (submitGuess(player.playerId, roomId, trimmed) != null) return;
 
         String word = room.word;
@@ -468,11 +565,32 @@ public class GuestService {
                 messaging.convertAndSendToUser(player.playerId, "/queue/hint", new GuestDto.CloseGuess(trimmed));
             }
         }
-        chat(player, roomId, trimmed);
+        chat(player, roomId, ChatFilter.censor(trimmed));
     }
 
+    /** The word with every letter/digit blanked, keeping spaces and punctuation: "ice cream" → "___ _____". */
+    static String pattern(String word) {
+        return pattern(word, Set.of());
+    }
+
+    /** Same, but the letters at {@code revealed} positions are shown: "_a__". */
+    static String pattern(String word, Set<Integer> revealed) {
+        if (word == null) return null;
+        StringBuilder b = new StringBuilder(word.length());
+        for (int i = 0; i < word.length(); i++) {
+            char c = word.charAt(i);
+            b.append(Character.isLetterOrDigit(c) && !revealed.contains(i) ? '_' : c);
+        }
+        return b.toString();
+    }
+
+    /** Case-, accent- and spacing-insensitive form used to compare guesses: "Chauve-Souris" ≈ "chauve souris". */
     static String normalize(String s) {
-        return s == null ? "" : s.trim().toLowerCase().replaceAll("\\s+", " ");
+        if (s == null) return "";
+        String folded = java.text.Normalizer.normalize(s.toLowerCase(), java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('ß', 's');
+        return folded.replaceAll("[-_'’.]", " ").trim().replaceAll("\\s+", " ");
     }
 
     /** One typo away (two for long words) counts as close. */
@@ -635,17 +753,21 @@ public class GuestService {
         return new GuestDto.RoomInfo(room.roomId, room.name, room.isPrivate, room.status, room.hostId,
                 room.maxPlayers, room.totalRounds, room.drawingTimeSec, room.customWordsEnabled,
                 room.roundIndex, room.playerCount(), new ArrayList<>(room.customWords),
-                room.orderedPlayers().stream().map(this::toPlayerInfo).toList());
+                room.orderedPlayers().stream().map(this::toPlayerInfo).toList(),
+                room.language, room.hintsEnabled);
     }
 
     public GuestDto.GameState toGameState(GameRoom room, GuestPlayer viewer) {
         boolean drawer = viewer.playerId.equals(room.drawerId);
-        return new GuestDto.GameState(room.roundIndex + 1, room.drawerId,
-                room.drawerId == null || room.players.get(room.drawerId) == null
-                        ? null : room.players.get(room.drawerId).nickname,
+        boolean choosing = "PLAYING".equals(room.status) && room.word == null;
+        GuestPlayer drawerPlayer = room.drawerId == null ? null : room.players.get(room.drawerId);
+        return new GuestDto.GameState(room.roundIndex + 1, room.totalRounds, room.drawerId,
+                drawerPlayer == null ? null : drawerPlayer.nickname,
                 room.drawingTimeSec, (int) room.remainingSeconds(), scores(room),
                 drawer ? room.word : null, copyStrokes(room),
-                "PLAYING".equals(room.status));
+                "PLAYING".equals(room.status), choosing,
+                drawer && choosing ? room.wordOptions : null,
+                pattern(room.word, room.revealed));
     }
 
     private List<Object> copyStrokes(GameRoom room) {

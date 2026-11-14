@@ -1,3 +1,4 @@
+import { WifiOff } from 'lucide-react';
 import { useConnectionStatus } from '../ws';
 
 /** Sticky banner shown while the shared socket is (re)connecting after it had connected once. */
@@ -7,9 +8,9 @@ export default function ConnectionBanner() {
   return (
     <div
       role="status"
-      className="sticky top-0 z-50 flex items-center justify-center gap-2 bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-800 shadow"
+      className="sticky top-0 z-50 flex items-center justify-center gap-2 border-b-2 border-ink bg-marker px-4 py-2 font-hand text-lg text-ink"
     >
-      <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-700 border-t-transparent" />
+      <WifiOff size={18} className="animate-pulse" />
       Connection lost — reconnecting…
     </div>
   );

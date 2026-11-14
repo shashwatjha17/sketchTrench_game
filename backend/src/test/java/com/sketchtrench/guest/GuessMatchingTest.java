@@ -39,4 +39,40 @@ class GuessMatchingTest {
         assertEquals(1, GuestService.levenshtein("ab", "ba"));
         assertEquals(3, GuestService.levenshtein("kitten", "sitting"));
     }
+
+    @Test
+    void patternBlanksLettersButKeepsSpaces() {
+        assertEquals("___ _____", GuestService.pattern("ice cream"));
+        assertEquals("_-_____", GuestService.pattern("t-shirt"));
+        assertEquals(null, GuestService.pattern(null));
+    }
+
+    @Test
+    void guessesIgnoreAccentsAndHyphens() {
+        assertEquals(GuestService.normalize("éléphant"), GuestService.normalize("Elephant"));
+        assertEquals(GuestService.normalize("chauve-souris"), GuestService.normalize("chauve souris"));
+    }
+
+    @Test
+    void patternShowsRevealedLetters() {
+        assertEquals("_a__", GuestService.pattern("lamp", java.util.Set.of(1)));
+        assertEquals("i__ ____m", GuestService.pattern("ice cream", java.util.Set.of(0, 8)));
+    }
+
+    @Test
+    void hintCountScalesWithWordLengthAndKeepsTwoHidden() {
+        assertEquals(0, GuestService.hintCount("ox"));
+        assertEquals(1, GuestService.hintCount("cat"));
+        assertEquals(1, GuestService.hintCount("lamp"));
+        assertEquals(2, GuestService.hintCount("tiger"));
+        assertEquals(3, GuestService.hintCount("elephant"));
+        assertEquals(4, GuestService.hintCount("cepillo de dientes"));
+    }
+
+    @Test
+    void settingsAreClamped() {
+        assertEquals(1, GuestService.clamp(0, 1, 10));
+        assertEquals(10, GuestService.clamp(99, 1, 10));
+        assertEquals(5, GuestService.clamp(5, 1, 10));
+    }
 }

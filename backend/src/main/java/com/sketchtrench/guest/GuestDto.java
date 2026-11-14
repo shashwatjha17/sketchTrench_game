@@ -17,7 +17,13 @@ public record GuestDto() {
 
     public record CreateRoomRequest(String name, boolean isPrivate, int maxPlayers,
                                     int totalRounds, int drawingTimeSec, boolean customWords,
-                                    List<String> customWordList) {
+                                    List<String> customWordList, String language, Boolean hints) {
+    }
+
+    /** Host changes room settings before the game starts. Null fields stay as they are. */
+    public record SettingsRequest(Boolean isPrivate, Integer maxPlayers, Integer totalRounds,
+                                  Integer drawingTimeSec, Boolean customWords, String language,
+                                  Boolean hints) {
     }
 
     public record JoinRequest(String password) {
@@ -36,12 +42,18 @@ public record GuestDto() {
     public record RoomInfo(String roomId, String name, boolean isPrivate, String status, String hostId,
                            int maxPlayers, int totalRounds, int drawingTimeSec, boolean customWordsEnabled,
                            int currentRound, int playerCount, List<String> customWords,
-                           List<PlayerInfo> players) {
+                           List<PlayerInfo> players, String language, boolean hintsEnabled) {
     }
 
-    public record GameState(int roundNumber, String drawerId, String drawerName, int drawingTimeSec,
+    /**
+     * Snapshot for a (re)joining client. {@code wordOptions} is only filled for the drawer while
+     * they still have to pick (so a drawer who missed the private push can still choose);
+     * {@code wordPattern} is the word with every letter blanked ("_____ ___").
+     */
+    public record GameState(int roundNumber, int totalRounds, String drawerId, String drawerName, int drawingTimeSec,
                             int remainingSeconds, Map<String, Integer> scores, String secretWord,
-                            List<Object> strokes, boolean active) {
+                            List<Object> strokes, boolean active, boolean choosing,
+                            List<WordOption> wordOptions, String wordPattern) {
     }
 
     // ---- game broadcasts (mirror the old GameDto so the frontend keeps its shapes) ----
@@ -57,10 +69,15 @@ public record GuestDto() {
     public record RoundStarting(int roundNumber, String drawerId, String drawerName, int optionCount) {
     }
 
-    public record RoundStarted(int roundNumber, String drawerId, String drawerName, int drawingTimeSec) {
+    public record RoundStarted(int roundNumber, String drawerId, String drawerName, int drawingTimeSec,
+                               String wordPattern) {
     }
 
     public record TimerUpdate(int remainingSeconds) {
+    }
+
+    /** A letter of the word was revealed to guessers: the updated blanked pattern ("_ a _"). */
+    public record WordHint(String wordPattern) {
     }
 
     public record CorrectGuess(String userId, String username, int points, int remainingGuessers) {
