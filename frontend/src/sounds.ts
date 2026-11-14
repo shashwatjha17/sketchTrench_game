@@ -48,6 +48,8 @@ function tone(freq: number, start: number, dur: number, type: OscillatorType = '
 }
 
 export const sounds = {
+  /** a letter of the word was revealed */
+  hint: () => tone(988, 0, 0.09, 'sine', 0.08),
   /** someone (else) guessed the word */
   correct: () => {
     tone(660, 0, 0.12, 'triangle');

@@ -44,6 +44,19 @@ export interface GuestRoomInfo {
   playerCount: number;
   customWords: string[];
   players: GuestPlayer[];
+  /** word language: en | de | fr | es */
+  language: string;
+  hintsEnabled: boolean;
+}
+
+export interface RoomSettings {
+  isPrivate?: boolean;
+  maxPlayers?: number;
+  totalRounds?: number;
+  drawingTimeSec?: number;
+  customWords?: boolean;
+  language?: string;
+  hints?: boolean;
 }
 
 export interface SessionResponse {
@@ -73,11 +86,25 @@ export interface SecretWord {
   word: string;
 }
 
+export interface RoundStarting {
+  roundNumber: number;
+  drawerId: string;
+  drawerName: string;
+  optionCount: number;
+}
+
 export interface RoundStarted {
   roundNumber: number;
   drawerId: string;
   drawerName: string;
   drawingTimeSec: number;
+  /** the word with letters blanked, e.g. "___ _____" */
+  wordPattern: string | null;
+}
+
+/** a letter was revealed to guessers */
+export interface WordHint {
+  wordPattern: string;
 }
 
 export interface TimerUpdate {
@@ -135,6 +162,7 @@ export interface SystemMessage {
 
 export interface GuestGameState {
   roundNumber: number;
+  totalRounds: number;
   drawerId: string | null;
   drawerName: string;
   drawingTimeSec: number;
@@ -143,4 +171,9 @@ export interface GuestGameState {
   secretWord: string | null;
   strokes: BoardEvent[];
   active: boolean;
+  /** a round is on but the drawer hasn't picked a word yet */
+  choosing: boolean;
+  /** only for the drawer while choosing */
+  wordOptions: WordOption[] | null;
+  wordPattern: string | null;
 }

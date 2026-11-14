@@ -2,36 +2,125 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-[#fdf6ea] text-slate-700;
+/* ---------- sketchbook base ---------- */
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    /* faint graph-paper grid */
+    background-image:
+      linear-gradient(to right, rgba(31, 29, 26, 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(31, 29, 26, 0.045) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-hand;
+  }
+
+  :focus-visible {
+    outline: 3px solid #f5b700;
+    outline-offset: 2px;
+  }
 }
 
-.btn {
-  @apply rounded-full bg-[#6d5dfc] px-5 py-2 font-bold text-white transition
-    hover:bg-[#5a4bf0] disabled:cursor-not-allowed disabled:opacity-40;
+@layer components {
+  /* a sheet of paper: ink outline + hard offset shadow */
+  .sheet {
+    @apply rounded-2xl border-2 border-ink bg-white shadow-sketch;
+  }
+
+  .sheet-flat {
+    @apply rounded-2xl border-2 border-ink bg-white;
+  }
+
+  /* buttons wobble slightly, like they were drawn by hand */
+  .btn,
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 border-2 border-ink px-5 py-2 font-hand text-xl leading-none text-ink shadow-sketch-sm transition
+      hover:-translate-x-px hover:-translate-y-px hover:shadow-sketch
+      active:translate-x-0.5 active:translate-y-0.5 active:shadow-none
+      disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-sketch-sm;
+    border-radius: 14px 18px 12px 20px / 18px 12px 20px 14px;
+  }
+
+  .btn {
+    @apply bg-marker hover:bg-marker-deep;
+  }
+
+  .btn-secondary {
+    @apply bg-white hover:bg-paper;
+  }
+
+  .btn-lg {
+    @apply px-6 py-3 text-2xl;
+  }
+
+  /* low-emphasis text action */
+  .btn-quiet {
+    @apply inline-flex items-center gap-1.5 rounded-lg px-2 py-1 font-semibold text-ink-soft transition hover:bg-paper-deep hover:text-ink
+      disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-xl border-2 border-ink bg-white text-ink transition
+      hover:bg-paper-deep disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .input {
+    @apply w-full rounded-xl border-2 border-ink bg-white px-3 py-2 text-ink outline-none transition
+      placeholder:text-ink-faint focus:shadow-sketch-sm focus:ring-0;
+  }
+
+  .label {
+    @apply mb-1 block font-hand text-lg leading-none text-ink;
+  }
+
+  .tag {
+    @apply inline-flex items-center gap-1 rounded-md border-[1.5px] border-ink px-1.5 py-px font-hand text-sm leading-tight text-ink;
+  }
+
+  /* highlighter swipe behind a word */
+  .highlight {
+    background-image: linear-gradient(
+      100deg,
+      transparent 2%,
+      #ffd23f 4%,
+      #ffd23f 94%,
+      transparent 97%
+    );
+    background-size: 100% 46%;
+    background-position: 0 82%;
+    background-repeat: no-repeat;
+    padding: 0 0.15em;
+  }
+
+  /* scribbled underline used for word blanks */
+  .blank {
+    @apply inline-block h-[1em] w-[0.75em] border-b-[3px] border-ink text-center;
+    border-radius: 1px;
+    transform: rotate(-1.5deg);
+  }
 }
 
-.btn-ghost {
-  @apply rounded-full border border-slate-200 bg-white px-5 py-2 font-semibold text-slate-600
-    transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40;
-}
+/* ---------- motion ---------- */
 
-.input {
-  @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700
-    outline-none transition focus:border-[#6d5dfc];
-}
-
-/* correct-guess celebration */
 @keyframes celebrate-pop {
   0% {
-    transform: scale(0.3);
+    transform: scale(0.3) rotate(-6deg);
     opacity: 0;
   }
   60% {
-    transform: scale(1.15);
+    transform: scale(1.08) rotate(2deg);
   }
   100% {
-    transform: scale(1);
+    transform: scale(1) rotate(-1deg);
     opacity: 1;
   }
 }
@@ -47,80 +136,45 @@ body {
   }
   100% {
     transform: translateY(110vh) rotate(720deg);
-    opacity: 0.85;
+    opacity: 0.9;
   }
 }
 
 .confetti-piece {
   position: absolute;
   top: 0;
+  border: 1.5px solid #1f1d1a;
   animation: confetti-fall linear forwards;
 }
 
-/* landing page hero doodles */
-@keyframes floaty {
-  0%,
-  100% {
-    transform: translateY(0) rotate(-4deg);
-  }
-  50% {
-    transform: translateY(-14px) rotate(4deg);
-  }
-}
-
-.animate-floaty {
-  animation: floaty 5s ease-in-out infinite;
-}
-
-/* how-to-play step cards */
 @keyframes step-in {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.96);
+    transform: translateY(14px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
 .animate-step-in {
-  animation: step-in 0.55s ease-out both;
-}
-
-@keyframes play-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
-  }
-  70% {
-    box-shadow: 0 0 0 16px rgba(34, 197, 94, 0);
-  }
-}
-
-.animate-play-pulse {
-  animation: play-pulse 2s infinite;
+  animation: step-in 0.5s ease-out both;
 }
 
 /* hand-drawn doodles: each stroke draws itself in like a pen going down */
 @keyframes doodle-draw {
   from {
     stroke-dashoffset: 1;
-    opacity: 0.9;
   }
   to {
     stroke-dashoffset: 0;
-    opacity: 0.85;
   }
 }
 
 .doodle-line path {
   stroke-dasharray: 1;
   animation: doodle-draw 1.6s ease-out both;
-}
-
-.doodle-line {
-  opacity: 0.85;
 }
 
 @keyframes doodle-wiggle {
@@ -137,43 +191,43 @@ body {
   animation: doodle-wiggle 7s ease-in-out infinite;
 }
 
-/* interactive doodles: hover to enlarge, redraw on click */
 .doodle-interactive {
   cursor: pointer;
-  transition:
-    transform 0.25s ease,
-    opacity 0.25s ease;
+  transition: transform 0.25s ease;
 }
 
 .doodle-interactive:hover {
-  transform: scale(1.3) rotate(6deg);
-  opacity: 1;
+  transform: scale(1.25) rotate(6deg);
 }
 
 .doodle-interactive:active {
-  transform: scale(1.15) rotate(-4deg);
+  transform: scale(1.1) rotate(-4deg);
 }
 
-/* alarm clock ringing (final seconds of a round) */
+/* timer shakes in the final seconds of a round */
 @keyframes alarm-ring {
   0%,
   100% {
     transform: rotate(0deg);
   }
-  20% {
-    transform: rotate(-8deg);
+  25% {
+    transform: rotate(-7deg);
   }
-  40% {
-    transform: rotate(8deg);
-  }
-  60% {
-    transform: rotate(-6deg);
-  }
-  80% {
-    transform: rotate(6deg);
+  75% {
+    transform: rotate(7deg);
   }
 }
 
 .animate-alarm-ring {
-  animation: alarm-ring 0.5s ease-in-out infinite;
+  animation: alarm-ring 0.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-alarm-ring,
+  .animate-doodle-wiggle,
+  .celebrate-pop,
+  .confetti-piece,
+  .doodle-line path {
+    animation: none !important;
+  }
 }
