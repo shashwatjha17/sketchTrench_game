@@ -41,11 +41,7 @@ public class GuestMessageHandler {
         if (player == null || request == null || request.words() == null || request.words().isEmpty()) {
             return;
         }
-        String text = request.words().get(0);
-        GuestDto.CorrectGuess guess = service.submitGuess(player.playerId, roomId, text);
-        if (guess == null) {
-            service.chat(player, roomId, text);
-        }
+        service.handleMessage(player, roomId, request.words().get(0));
     }
 
     @MessageMapping("/guest/typing/{roomId}")

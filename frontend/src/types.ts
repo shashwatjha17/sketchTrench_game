@@ -25,6 +25,7 @@ export interface GuestPlayer extends Avatar {
   isHost: boolean;
   isDrawing: boolean;
   isConnected: boolean;
+  isBot: boolean;
 }
 
 export type RoomStatus = 'WAITING' | 'PLAYING' | 'FINISHED';
@@ -116,6 +117,22 @@ export interface Stroke {
   size: number;
 }
 
+/** Everything that can happen on the shared board (mirrors Canvas's DrawEvent). */
+export type BoardEvent =
+  | Stroke
+  | { type: 'fill'; x: number; y: number; color: string }
+  | { type: 'clear' };
+
+/** Private: your guess was one typo away. */
+export interface CloseGuess {
+  closeGuess: string;
+}
+
+/** Server notice shown in chat (votes, kicks, blocked messages). */
+export interface SystemMessage {
+  system: string;
+}
+
 export interface GuestGameState {
   roundNumber: number;
   drawerId: string | null;
@@ -124,6 +141,6 @@ export interface GuestGameState {
   remainingSeconds: number;
   scores: Record<string, number>;
   secretWord: string | null;
-  strokes: Stroke[];
+  strokes: BoardEvent[];
   active: boolean;
 }

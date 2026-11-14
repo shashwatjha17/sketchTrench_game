@@ -101,6 +101,13 @@ export const guestApi = {
       method: 'POST',
       body: JSON.stringify({ word }),
     }, playerId),
+  addBot: (playerId: string, roomId: string) =>
+    request<GuestRoomInfo>(`/api/guest/rooms/${roomId}/bots`, { method: 'POST' }, playerId),
+  removeBot: (playerId: string, roomId: string, botId: string) =>
+    request<GuestRoomInfo>(`/api/guest/rooms/${roomId}/bots/${botId}/remove`, { method: 'POST' }, playerId),
+  /** Host: kicks instantly. Everyone else: one vote; a majority of the other players kicks. */
+  voteKick: (playerId: string, roomId: string, targetId: string) =>
+    request<void>(`/api/guest/rooms/${roomId}/kick/${targetId}`, { method: 'POST' }, playerId),
   guess: (playerId: string, roomId: string, text: string) =>
     request<{ userId: string; username: string; points: number; remainingGuessers: number } | null>(
       `/api/guest/rooms/${roomId}/guess`,

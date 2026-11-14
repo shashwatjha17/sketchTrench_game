@@ -103,6 +103,25 @@ public class GuestController {
         return service.getRoom(roomId);
     }
 
+    // ---- bots & moderation ----
+
+    @PostMapping("/rooms/{roomId}/bots")
+    public GuestDto.RoomInfo addBot(@RequestHeader(PLAYER_HEADER) String playerId, @PathVariable String roomId) {
+        return service.addBot(requirePlayer(playerId), roomId);
+    }
+
+    @PostMapping("/rooms/{roomId}/bots/{botId}/remove")
+    public GuestDto.RoomInfo removeBot(@RequestHeader(PLAYER_HEADER) String playerId,
+                                       @PathVariable String roomId, @PathVariable String botId) {
+        return service.removeBot(requirePlayer(playerId), roomId, botId);
+    }
+
+    @PostMapping("/rooms/{roomId}/kick/{targetId}")
+    public void voteKick(@RequestHeader(PLAYER_HEADER) String playerId,
+                         @PathVariable String roomId, @PathVariable String targetId) {
+        service.voteKick(requirePlayer(playerId), roomId, targetId);
+    }
+
     // ---- game ----
 
     @PostMapping("/rooms/{roomId}/guess")

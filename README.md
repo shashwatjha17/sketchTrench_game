@@ -2,6 +2,16 @@
 
 A modern real-time multiplayer drawing-and-guessing game inspired by Skribbl.io. Guests pick a nickname, join or create rooms, take turns sketching randomly assigned words, and race to guess each other's drawings for points.
 
+## Features
+
+- Real-time drawing & guessing over WebSockets (STOMP) — public matchmaking, private rooms, invite links
+- **Practice with bots** — bots join your room and guess while you draw (they never draw)
+- **"Close!" hints** — a guess one typo away (two for long words) gets a private nudge
+- **Vote-kick** — majority of the other players kicks; the host can kick instantly
+- **Undo** (button or Ctrl/Cmd+Z), brush sizes, colour picker, eraser, paint-bucket fill
+- Synthesized sound effects with a mute toggle
+- Auto-reconnect with backoff; late joiners replay the current drawing
+
 ## Stack
 
 - **Backend** — Java 21, Spring Boot 3.5 (Web, Security, WebSocket/STOMP), Lombok. All sessions, rooms, and games live in memory — no database.

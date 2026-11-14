@@ -29,6 +29,7 @@ export default function LobbyPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const inviteCode = params.get('join')?.trim() ?? '';
+  const wasKicked = params.get('kicked') === '1';
   const [session, setSession] = useState<GuestSession | null>(null);
   const [nickname, setNickname] = useState('');
   const [avatar, setAvatar] = useState({
@@ -39,7 +40,7 @@ export default function LobbyPage() {
   });
   const [language, setLanguage] = useState('en');
   const [roomCode, setRoomCode] = useState(inviteCode);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(wasKicked ? 'You were removed from that room.' : '');
   const [busy, setBusy] = useState(false);
   // 'checking' → first ping in flight; 'waking' → slow (free-tier server is cold-starting)
   const [server, setServer] = useState<'checking' | 'waking' | 'ready' | 'down'>('checking');
@@ -97,6 +98,32 @@ export default function LobbyPage() {
       navigate(`/rooms/${room.roomId}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create a room');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Solo practice: a private room with two bots that guess while you draw. */
+  const practice = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      const s = await ensureSession();
+      const room = await guestApi.createRoom(s.playerId, {
+        name: `${nickname}'s practice`,
+        isPrivate: true,
+        maxPlayers: 8,
+        totalRounds: 3,
+        drawingTimeSec: 80,
+        customWords: false,
+        customWordList: DEFAULT_WORDS,
+      });
+      await guestApi.addBot(s.playerId, room.roomId);
+      await guestApi.addBot(s.playerId, room.roomId);
+      setSession(s);
+      navigate(`/rooms/${room.roomId}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not start practice');
     } finally {
       setBusy(false);
     }
@@ -295,6 +322,15 @@ export default function LobbyPage() {
             >
               Create Private Room
             </button>
+            <button
+              type="button"
+              disabled={busy || !nickname.trim()}
+              onClick={practice}
+              className="btn-ghost w-full !py-3"
+              title="You draw, bots guess"
+            >
+              🤖 Practice with bots
+            </button>
           </div>
 
           <div className="flex gap-2 border-t border-slate-100 pt-4">
@@ -348,7 +384,8 @@ export default function LobbyPage() {
           ))}
         </ol>
         <p className="mt-5 text-center text-sm text-slate-400">
-          Playing with friends? Create a private room and share the invite link.
+          Playing with friends? Create a private room and share the invite link. No one around?
+          Practice with bots — you draw, they guess.
         </p>
       </section>
 

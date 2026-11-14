@@ -25,7 +25,13 @@ export interface ClearEvent {
   type: 'clear';
 }
 
-export type DrawEvent = PathEvent | FillEvent | ClearEvent;
+export interface UndoEvent {
+  type: 'undo';
+}
+
+/** Board events that change pixels (kept in the history / replay log). */
+export type BoardEvent = PathEvent | FillEvent | ClearEvent;
+export type DrawEvent = BoardEvent | UndoEvent;
 
 export interface Stroke {
   type: 'path';
@@ -39,6 +45,7 @@ const BACKGROUND = '#1e3a34';
  *  client agrees on positions regardless of its screen; the backing store is scaled up. */
 const LOGICAL_WIDTH = 900;
 const FILL_TOLERANCE = 48;
+const MAX_HISTORY = 3000;
 const BRUSH_SIZES = [3, 6, 12, 20];
 const ERASER_SIZE = 24;
 
@@ -49,7 +56,8 @@ interface CanvasProps {
   roomId?: string;
   readOnly?: boolean;
   height?: number;
-  initialStrokes?: Stroke[];
+  /** Events to replay on mount (late join / refresh). Older servers sent paths only. */
+  initialStrokes?: BoardEvent[];
 }
 
 /**
@@ -69,6 +77,12 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
   const [size, setSize] = useState(6);
   // backing-store pixels per logical pixel (≥1, ≤3); set once on mount from DPR + display size
   const scaleRef = useRef(1);
+  // everything drawn so far, in order — undo pops the last event and replays the rest
+  const historyRef = useRef<BoardEvent[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  // read inside the long-lived socket subscription, so it must not be a stale closure value
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
   const publish = (payload: DrawEvent) => {
     if (roomId) stomp.publish(`/app/guest/drawing/${roomId}`, payload);
@@ -77,13 +91,14 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
   useEffect(() => {
     if (!roomId) return;
     const unsub = stomp.subscribe(`/topic/drawing/${roomId}`, (payload) => {
+      // the server echoes the drawer's own events back; the drawer already applied them
+      if (!readOnlyRef.current) return;
       const msg = payload as DrawEvent;
-      if (msg.type === 'clear') {
-        clearCanvas();
-      } else if (msg.type === 'fill') {
-        fillAt(msg.x, msg.y, msg.color);
-      } else if (msg.type === 'path') {
-        drawPath(msg);
+      if (msg.type === 'undo') {
+        undoLocal();
+      } else if (msg.type === 'clear' || msg.type === 'fill' || msg.type === 'path') {
+        applyEvent(msg);
+        record(msg);
       }
     });
     return unsub;
@@ -91,6 +106,35 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
   }, [roomId]);
 
   const ctx = () => canvasRef.current?.getContext('2d');
+
+  const applyEvent = (ev: BoardEvent) => {
+    if (ev.type === 'clear') clearCanvas();
+    else if (ev.type === 'fill') fillAt(ev.x, ev.y, ev.color);
+    else if (ev.type === 'path') drawPath(ev);
+  };
+
+  const record = (ev: BoardEvent) => {
+    const h = historyRef.current;
+    h.push(ev);
+    if (h.length > MAX_HISTORY) h.shift();
+    setCanUndo(true);
+  };
+
+  /** Drop the last event and redraw everything else from scratch. */
+  const undoLocal = () => {
+    const h = historyRef.current;
+    if (h.length === 0) return false;
+    h.pop();
+    clearCanvas();
+    h.forEach(applyEvent);
+    setCanUndo(h.length > 0);
+    return true;
+  };
+
+  const undo = () => {
+    if (readOnly) return;
+    if (undoLocal()) publish({ type: 'undo' } satisfies UndoEvent);
+  };
 
   const clearCanvas = () => {
     const c = canvasRef.current;
@@ -180,8 +224,10 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
     if (tool === 'fill') {
       const p = localPos(e);
       const strokeColor = color;
-      fillAt(p.x, p.y, strokeColor);
-      publish({ type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color: strokeColor } satisfies FillEvent);
+      const ev: FillEvent = { type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color: strokeColor };
+      fillAt(ev.x, ev.y, ev.color);
+      record(ev);
+      publish(ev);
       drawingRef.current = true;
       lastFill.current = p;
       return;
@@ -197,8 +243,10 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
       // paint-fill: keep flooding along the drag path (throttled by distance)
       const last = lastFill.current;
       if (Math.hypot(p.x - last.x, p.y - last.y) > 40) {
-        fillAt(p.x, p.y, color);
-        publish({ type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color } satisfies FillEvent);
+        const ev: FillEvent = { type: 'fill', x: Math.round(p.x), y: Math.round(p.y), color };
+        fillAt(ev.x, ev.y, ev.color);
+        record(ev);
+        publish(ev);
         lastFill.current = p;
       }
       return;
@@ -222,20 +270,39 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
     if (!drawingRef.current) return;
     drawingRef.current = false;
     if (currentStroke.current.length > 1) {
-      publish({
+      const ev: PathEvent = {
         type: 'path',
         points: currentStroke.current,
         color: tool === 'eraser' ? BACKGROUND : color,
         size: tool === 'eraser' ? ERASER_SIZE : size,
-      } satisfies PathEvent);
+      };
+      record(ev);
+      publish(ev);
     }
     currentStroke.current = [];
   };
 
   const onClear = () => {
     clearCanvas();
-    publish({ type: 'clear' } satisfies ClearEvent);
+    const ev: ClearEvent = { type: 'clear' };
+    record(ev);
+    publish(ev);
   };
+
+  // Ctrl/Cmd+Z undoes, unless you're typing in a text field (e.g. the chat)
+  useEffect(() => {
+    if (readOnly) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      undo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly]);
 
   useEffect(() => {
     // size the backing store for the device's pixel density so lines stay crisp on
@@ -250,7 +317,12 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
       c.getContext('2d')?.setTransform(scale, 0, 0, scale, 0, 0);
     }
     clearCanvas();
-    initialStrokes?.forEach((s) => s.points.length > 1 && drawPath(s));
+    historyRef.current = [];
+    initialStrokes?.forEach((ev) => {
+      if (ev.type === 'path' && ev.points.length < 2) return;
+      applyEvent(ev);
+      record(ev);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -301,7 +373,15 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
             </div>
           )}
           <button
-            className="ml-auto rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-red-500"
+            className="ml-auto rounded-full bg-[#6b421f] px-3 py-1 text-xs font-bold text-amber-50 transition hover:bg-[#5d391a] disabled:opacity-40"
+            onClick={undo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+          >
+            ↶ Undo
+          </button>
+          <button
+            className="rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white transition hover:bg-red-500"
             onClick={onClear}
           >
             Clear

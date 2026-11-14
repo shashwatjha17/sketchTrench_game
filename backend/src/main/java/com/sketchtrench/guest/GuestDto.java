@@ -29,7 +29,8 @@ public record GuestDto() {
     // ---- player / room snapshots ----
     public record PlayerInfo(String playerId, String nickname, String avatarColor, String avatarExpression,
                              boolean avatarSunglasses, String avatarWig, String language,
-                             int score, boolean isHost, boolean isDrawing, boolean isConnected) {
+                             int score, boolean isHost, boolean isDrawing, boolean isConnected,
+                             boolean isBot) {
     }
 
     public record RoomInfo(String roomId, String name, boolean isPrivate, String status, String hostId,
@@ -76,5 +77,17 @@ public record GuestDto() {
     }
 
     public record TypingIndicator(String userId, String username) {
+    }
+
+    /** Private nudge to a guesser whose guess was one or two letters off. */
+    public record CloseGuess(String closeGuess) {
+    }
+
+    /** Server notice shown in the chat (votes, kicks, blocked messages). */
+    public record SystemMessage(String system) {
+    }
+
+    /** Sent privately to a player who was removed from the room. */
+    public record Kicked(String kickedFrom) {
     }
 }

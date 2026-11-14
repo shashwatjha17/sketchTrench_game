@@ -6,15 +6,19 @@ import { guestApi } from '../api';
 import { loadSession, connectWS } from '../guest';
 import Canvas from '../components/Canvas';
 import Avatar from '../components/Avatar';
+import { sounds, useMuted } from '../sounds';
 import type {
   Avatar as AvatarData,
+  BoardEvent,
+  CloseGuess,
   CorrectGuess,
+  GuestRoomInfo,
   GameEnded,
   GuestGameState,
   RoundEnded,
   RoundStarted,
   SecretWord,
-  Stroke,
+  SystemMessage,
   TimerUpdate,
   TypingIndicator,
   WordOptions,
@@ -25,6 +29,14 @@ type Phase = 'starting' | 'choosing' | 'drawing' | 'reveal' | 'ended';
 interface PlayerInfo {
   username: string;
   avatar: Partial<AvatarData>;
+  isBot: boolean;
+}
+
+/** chat = normal message · system = server notice · close = your near-miss (only you see it) */
+interface ChatLine {
+  username: string;
+  text: string;
+  kind: 'chat' | 'system' | 'close';
 }
 
 interface GameState {
@@ -40,6 +52,8 @@ interface GameState {
   scores: Record<string, number>;
   winner: { id: string | null; name: string | null } | null;
   lastGuess: CorrectGuess | null;
+  /** points you scored this round by guessing (null = not guessed yet) */
+  myGuessPoints: number | null;
 }
 
 const initial: GameState = {
@@ -55,6 +69,7 @@ const initial: GameState = {
   scores: {},
   winner: null,
   lastGuess: null,
+  myGuessPoints: null,
 };
 
 export default function GamePage() {
@@ -63,7 +78,9 @@ export default function GamePage() {
   const navigate = useNavigate();
   const [session] = useState(() => loadSession());
   const [state, setState] = useState<GameState>(initial);
-  const [messages, setMessages] = useState<{ username: string; text: string }[]>([]);
+  const [messages, setMessages] = useState<ChatLine[]>([]);
+  const [muted, setMuted] = useMuted();
+  const myId = session?.playerId;
   const [typing, setTyping] = useState<{ userId: string; username: string } | null>(null);
   const [guess, setGuess] = useState('');
   const [players, setPlayers] = useState<Record<string, PlayerInfo>>({});
@@ -71,26 +88,33 @@ export default function GamePage() {
   const [celebration, setCelebration] = useState<CorrectGuess | null>(null);
   const celebTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phaseAdvanced = useRef(false);
-  const [replay, setReplay] = useState<{ v: number; strokes: Stroke[] }>({ v: 0, strokes: [] });
+  const [replay, setReplay] = useState<{ v: number; strokes: BoardEvent[] }>({ v: 0, strokes: [] });
+  const pushLine = useCallback((line: ChatLine) => setMessages((m) => [...m.slice(-199), line]), []);
 
   useEffect(() => {
     if (!session) navigate('/', { replace: true });
     else connectWS();
   }, [session, navigate]);
 
-  // pull player names + avatars from the room (game broadcasts only carry ids)
+  // pull player names + avatars from the room (game broadcasts only carry ids), and keep
+  // them current as people join, leave or get kicked
+  const applyRoom = useCallback((room: GuestRoomInfo) => {
+    const map: Record<string, PlayerInfo> = {};
+    for (const p of room.players) {
+      map[p.playerId] = { username: p.nickname, avatar: p, isBot: p.isBot };
+    }
+    setPlayers(map);
+    // drop scores of players who are gone
+    setState((s) => ({
+      ...s,
+      scores: Object.fromEntries(Object.entries(s.scores).filter(([pid]) => map[pid] !== undefined)),
+    }));
+  }, []);
+
   useEffect(() => {
-    guestApi
-      .getRoom(roomId)
-      .then((room) => {
-        const map: Record<string, PlayerInfo> = {};
-        for (const p of room.players) {
-          map[p.playerId] = { username: p.nickname, avatar: p };
-        }
-        setPlayers(map);
-      })
-      .catch(() => {});
-  }, [roomId]);
+    guestApi.getRoom(roomId).then(applyRoom).catch(() => {});
+    return stomp.subscribe(`/topic/room/${roomId}`, (payload) => applyRoom(payload as GuestRoomInfo));
+  }, [roomId, applyRoom]);
 
   useEffect(() => {
     if (!session) return;
@@ -154,9 +178,21 @@ export default function GamePage() {
   useEffect(() => {
     const unsubs = [
       stomp.subscribe(`/topic/game/${roomId}`, (payload) => onGameMessage(payload)),
-      stomp.subscribe('/user/queue/word-options', (payload) =>
-        setState((s) => ({ ...s, wordOptions: payload as WordOptions, phase: 'choosing' })),
-      ),
+      stomp.subscribe('/user/queue/word-options', (payload) => {
+        sounds.yourTurn();
+        setState((s) => ({ ...s, wordOptions: payload as WordOptions, phase: 'choosing' }));
+      }),
+      // private notices: "close!" hints and blocked messages
+      stomp.subscribe('/user/queue/hint', (payload) => {
+        const p = payload as Partial<CloseGuess & SystemMessage>;
+        if (p.closeGuess) {
+          sounds.close();
+          pushLine({ username: '', text: `"${p.closeGuess}" is close!`, kind: 'close' });
+        } else if (p.system) {
+          pushLine({ username: '', text: p.system, kind: 'system' });
+        }
+      }),
+      stomp.subscribe('/user/queue/kicked', () => navigate('/?kicked=1', { replace: true })),
       stomp.subscribe('/user/queue/word', (payload) =>
         setState((s) => ({ ...s, secretWord: (payload as SecretWord).word })),
       ),
@@ -170,7 +206,9 @@ export default function GamePage() {
     const advance = () => {
       phaseAdvanced.current = true;
     };
-    if (msg.roundNumber !== undefined && msg.drawerId !== undefined) {
+    if (typeof msg.system === 'string') {
+      pushLine({ username: '', text: msg.system, kind: 'system' });
+    } else if (msg.roundNumber !== undefined && msg.drawerId !== undefined) {
       if ((msg as Record<string, unknown>).optionCount !== undefined) {
         advance();
         setState((s) => ({ ...s, roundNumber: msg.roundNumber as number, phase: 'starting' }));
@@ -187,15 +225,21 @@ export default function GamePage() {
           remaining: rs.drawingTimeSec,
           revealedWord: null,
           lastGuess: null,
+          myGuessPoints: null,
         }));
       }
     } else if (msg.remainingSeconds !== undefined) {
-      setState((s) => ({ ...s, remaining: (msg as unknown as TimerUpdate).remainingSeconds }));
+      const left = (msg as unknown as TimerUpdate).remainingSeconds;
+      if (left > 0 && left <= 10) sounds.tick();
+      setState((s) => ({ ...s, remaining: left }));
     } else if (msg.userId !== undefined && msg.points !== undefined && msg.remainingGuessers !== undefined) {
       const cg = msg as unknown as CorrectGuess;
+      if (cg.userId === myId) sounds.youGuessed();
+      else sounds.correct();
       setState((s) => ({
         ...s,
         lastGuess: cg,
+        myGuessPoints: cg.userId === myId ? cg.points : s.myGuessPoints,
         scores: { ...s.scores, [cg.userId]: (s.scores[cg.userId] ?? 0) + cg.points },
       }));
       setCelebration(cg);
@@ -203,19 +247,32 @@ export default function GamePage() {
       celebTimer.current = setTimeout(() => setCelebration(null), 2600);
     } else if (msg.word !== undefined && msg.drawerBonus !== undefined) {
       const re = msg as unknown as RoundEnded;
+      sounds.roundEnd();
       setState((s) => ({ ...s, phase: 'reveal', revealedWord: re.word, scores: re.scores }));
     } else if (msg.winnerId !== undefined) {
       const ge = msg as unknown as GameEnded;
+      sounds.gameEnd();
       setState((s) => ({ ...s, phase: 'ended', winner: { id: ge.winnerId, name: ge.winnerName }, scores: ge.scores }));
     } else if (msg.username !== undefined && msg.text !== undefined) {
       const cm = msg as unknown as { username: string; text: string };
-      setMessages((m) => [...m.slice(-199), { username: cm.username, text: cm.text }]);
+      pushLine({ username: cm.username, text: cm.text, kind: 'chat' });
     } else if (msg.userId !== undefined && msg.username !== undefined) {
       const t = msg as unknown as TypingIndicator;
       setTyping(t);
       setTimeout(() => setTyping((cur) => (cur?.userId === t.userId ? null : cur)), 2000);
     }
-  }, []);
+  }, [myId, pushLine]);
+
+  const kick = async (pid: string) => {
+    if (!session) return;
+    const name = players[pid]?.username ?? 'this player';
+    if (!window.confirm(`Vote to kick ${name}?`)) return;
+    try {
+      await guestApi.voteKick(session.playerId, roomId, pid);
+    } catch (err) {
+      pushLine({ username: '', text: err instanceof Error ? err.message : 'Could not kick', kind: 'system' });
+    }
+  };
 
   const sendMessage = (e: FormEvent) => {
     e.preventDefault();
@@ -256,9 +313,19 @@ export default function GamePage() {
           </p>
         </div>
         <AlarmClock remaining={state.remaining} total={state.drawingTimeSec} active={state.phase === 'drawing'} />
-        <button className="btn-ghost !py-1 text-sm" onClick={leave}>
-          Leave
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="btn-ghost !px-3 !py-1 text-sm"
+            onClick={() => setMuted(!muted)}
+            aria-label={muted ? 'Unmute sounds' : 'Mute sounds'}
+            title={muted ? 'Unmute sounds' : 'Mute sounds'}
+          >
+            {muted ? '🔇' : '🔊'}
+          </button>
+          <button className="btn-ghost !py-1 text-sm" onClick={leave}>
+            Leave
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
@@ -279,16 +346,32 @@ export default function GamePage() {
 
         {/* side panel */}
         <div className="space-y-4">
-          <Scoreboard scores={state.scores} drawerId={state.drawerId} players={players} currentPlayerId={session?.playerId} />
+          <Scoreboard
+            scores={state.scores}
+            drawerId={state.drawerId}
+            players={players}
+            currentPlayerId={session?.playerId}
+            onKick={kick}
+          />
 
           <div className="rounded-2xl border-2 border-amber-100 bg-white p-3 shadow-sm shadow-amber-50">
             <h3 className="mb-2 text-sm font-semibold text-slate-500">Chat</h3>
             <div className="h-40 space-y-1 overflow-y-auto text-sm">
-              {messages.map((m, i) => (
-                <p key={i}>
-                  <span className="text-[#6d5dfc]">{m.username}:</span> <span>{m.text}</span>
-                </p>
-              ))}
+              {messages.map((m, i) =>
+                m.kind === 'chat' ? (
+                  <p key={i}>
+                    <span className="text-[#6d5dfc]">{m.username}:</span> <span>{m.text}</span>
+                  </p>
+                ) : (
+                  <p
+                    key={i}
+                    className={m.kind === 'close' ? 'font-semibold text-amber-600' : 'italic text-slate-400'}
+                  >
+                    {m.kind === 'close' ? '🔥 ' : ''}
+                    {m.text}
+                  </p>
+                ),
+              )}
               {typing && <p className="text-xs italic text-slate-400">{typing.username} is typing…</p>}
               <div ref={chatEndRef} />
             </div>
@@ -307,9 +390,9 @@ export default function GamePage() {
                 Send
               </button>
             </form>
-            {state.lastGuess && !amDrawer && state.phase === 'drawing' && (
+            {state.myGuessPoints !== null && !amDrawer && state.phase === 'drawing' && (
               <p className="mt-1 text-sm text-green-500">
-                You guessed it! +{state.lastGuess.points} points
+                You guessed it! +{state.myGuessPoints} points
               </p>
             )}
           </div>
@@ -465,11 +548,13 @@ function Scoreboard({
   drawerId,
   players,
   currentPlayerId,
+  onKick,
 }: {
   scores: Record<string, number>;
   drawerId: string | null;
   players: Record<string, PlayerInfo>;
   currentPlayerId: string | null | undefined;
+  onKick: (playerId: string) => void;
 }) {
   return (
     <div className="rounded-2xl border-2 border-amber-100 bg-white p-3 shadow-sm shadow-amber-50">
@@ -487,9 +572,22 @@ function Scoreboard({
                     {p?.username ?? `Player ${pid.slice(0, 6)}`}
                     {pid === drawerId && <span className="ml-1 text-xs">🖌</span>}
                     {pid === currentPlayerId && <span className="ml-1 text-xs text-[#6d5dfc]">(you)</span>}
+                    {p?.isBot && <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500">BOT</span>}
                   </span>
                 </span>
-                <span className="font-semibold text-slate-500">{pts}</span>
+                <span className="flex items-center gap-2">
+                  {pid !== currentPlayerId && p && !p.isBot && (
+                    <button
+                      className="text-xs text-slate-300 transition hover:text-red-500"
+                      onClick={() => onKick(pid)}
+                      aria-label={`Vote to kick ${p.username}`}
+                      title="Vote to kick"
+                    >
+                      🚫
+                    </button>
+                  )}
+                  <span className="font-semibold text-slate-500">{pts}</span>
+                </span>
               </li>
             );
           })}
