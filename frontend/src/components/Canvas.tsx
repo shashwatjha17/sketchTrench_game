@@ -345,7 +345,7 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
         style={{ backgroundColor: BACKGROUND, cursor: readOnly ? 'default' : tool === 'fill' ? 'cell' : 'crosshair' }}
       />
       {!readOnly && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t-2 border-ink bg-paper px-2.5 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t-2 border-ink bg-paper px-2 py-1.5 sm:gap-y-2 sm:px-2.5 sm:py-2">
           <div className="flex gap-1" role="group" aria-label="Tools">
             <ToolButton active={tool === 'brush'} onClick={() => setTool('brush')} label="Pencil">
               <Pencil size={18} />
@@ -358,7 +358,7 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
             </ToolButton>
           </div>
 
-          <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Colours">
+          <div className="order-last flex w-full flex-wrap items-center justify-between gap-[3px] sm:order-none sm:w-auto sm:justify-start sm:gap-1" role="group" aria-label="Colours">
             {PALETTE.map((c) => (
               <button
                 key={c}
@@ -366,7 +366,7 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
                   setColor(c);
                   if (tool === 'eraser') setTool('brush');
                 }}
-                className={`h-6 w-6 rounded-full border-2 transition ${
+                className={`h-5 w-5 rounded-full border-2 transition sm:h-6 sm:w-6 ${
                   color === c && tool !== 'eraser' ? 'scale-110 border-ink ring-2 ring-marker-deep ring-offset-1' : 'border-ink/60 hover:scale-110'
                 }`}
                 style={{ backgroundColor: c }}
@@ -375,7 +375,7 @@ export default function Canvas({ roomId, readOnly = false, height = 560, initial
               />
             ))}
             <label
-              className="relative h-6 w-6 cursor-pointer overflow-hidden rounded-full border-2 border-ink/60"
+              className="relative h-5 w-5 cursor-pointer overflow-hidden rounded-full border-2 border-ink/60 sm:h-6 sm:w-6"
               title="Custom colour"
               style={{ background: 'conic-gradient(#e03131, #ffd23f, #2f9e44, #1c7ed6, #7048e8, #e03131)' }}
             >

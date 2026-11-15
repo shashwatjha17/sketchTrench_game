@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Client, ReconnectionTimeMode, type IMessage, type StompSubscription } from '@stomp/stompjs';
-import SockJS from 'sockjs-client';
 import { BACKEND_URL } from './api';
 
-const WS_URL = BACKEND_URL;
+/**
+ * Plain WebSocket to Spring's SockJS endpoint ({@code /ws/websocket} is its raw-WebSocket
+ * transport). No sockjs-client: it cost ~50 KB of JS and registered an `unload` handler,
+ * which is deprecated and disables the browser's back/forward cache.
+ */
+const WS_URL = (BACKEND_URL || window.location.origin).replace(/^http/, 'ws') + '/ws/websocket';
 
 type Listener = (payload: unknown) => void;
 
@@ -11,7 +15,7 @@ type Listener = (payload: unknown) => void;
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting';
 
 /**
- * Single shared STOMP connection (SockJS fallback transports included).
+ * Single shared STOMP connection over a native WebSocket.
  *
  * - `connect()` is idempotent: calling it again for the same player keeps the live socket
  *   instead of tearing it down (pages call it on mount; the old behaviour opened a second
@@ -39,7 +43,7 @@ class StompConnection {
     this.playerId = playerId;
     this.setStatus('connecting');
     const client = new Client({
-      webSocketFactory: () => new SockJS(`${WS_URL}/ws`) as unknown as WebSocket,
+      webSocketFactory: () => new WebSocket(WS_URL),
       // the guest flow identifies over WS via the STOMP CONNECT header (GuestChannelInterceptor)
       connectHeaders: { 'X-Player-Id': playerId },
       reconnectDelay: 1000,

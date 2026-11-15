@@ -47,7 +47,10 @@ export default function LobbyPage() {
   });
   const [language, setLanguage] = useState('en');
   const [roomCode, setRoomCode] = useState(inviteCode);
-  const [error, setError] = useState(wasKicked ? 'You were removed from that room.' : '');
+  const wasDropped = params.get('gone') === '1';
+  const [error, setError] = useState(
+    wasKicked ? 'You were removed from that room.' : wasDropped ? "You're no longer in that game." : '',
+  );
   const [busy, setBusy] = useState(false);
   // 'checking' → first ping in flight; 'waking' → slow (free-tier server is cold-starting)
   const [server, setServer] = useState<'checking' | 'waking' | 'ready' | 'down'>('checking');

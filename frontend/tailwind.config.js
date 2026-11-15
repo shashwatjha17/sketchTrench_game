@@ -13,7 +13,7 @@ export default {
         ink: {
           DEFAULT: '#1f1d1a',
           soft: '#57534e',
-          faint: '#8a847b',
+          faint: '#6d675f', // 4.5:1+ on paper and paper-deep (WCAG AA)
         },
         marker: {
           DEFAULT: '#ffd23f',

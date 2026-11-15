@@ -105,7 +105,14 @@ export default function GamePage() {
 
   // pull player names + avatars from the room (game broadcasts only carry ids), and keep
   // them current as people join, leave or get kicked
+  const leaving = useRef(false);
   const applyRoom = useCallback((room: GuestRoomInfo) => {
+    // removed while offline (kicked, or reaped after a long disconnect): don't sit in a dead game.
+    // (not when we're leaving on purpose: our own departure is broadcast before we navigate)
+    if (myId && !leaving.current && !room.players.some((p) => p.playerId === myId)) {
+      navigate('/?gone=1', { replace: true });
+      return;
+    }
     const map: Record<string, PlayerInfo> = {};
     for (const p of room.players) {
       map[p.playerId] = { username: p.nickname, avatar: p, isBot: p.isBot };
@@ -117,7 +124,7 @@ export default function GamePage() {
       // everyone in the room shows on the scoreboard, even before scoring; drop leavers
       scores: Object.fromEntries(room.players.map((p) => [p.playerId, s.scores[p.playerId] ?? p.score ?? 0])),
     }));
-  }, []);
+  }, [myId, navigate]);
 
   useEffect(() => {
     guestApi.getRoom(roomId).then(applyRoom).catch(() => {});
@@ -173,8 +180,12 @@ export default function GamePage() {
         .state(session.playerId, roomId)
         .then((st) => st.active && applyGameState(st))
         .catch(() => {});
+      guestApi
+        .getRoom(roomId)
+        .then(applyRoom)
+        .catch(() => navigate('/?gone=1', { replace: true })); // room is gone (e.g. server restarted)
     });
-  }, [session, roomId, applyGameState]);
+  }, [session, roomId, applyGameState, applyRoom, navigate]);
 
   useEffect(() => {
     const box = chatBoxRef.current;
@@ -316,6 +327,7 @@ export default function GamePage() {
   };
 
   const leave = async () => {
+    leaving.current = true;
     if (session) {
       await guestApi.leaveRoom(session.playerId, roomId).catch(() => {});
     }
@@ -333,8 +345,8 @@ export default function GamePage() {
   return (
     <div className="mx-auto w-full max-w-[1400px] px-3 pb-6 sm:px-6">
       {/* top bar: round · word · timer */}
-      <div className="sticky top-0 z-20 -mx-3 bg-paper/95 px-3 pb-3 pt-3 backdrop-blur sm:-mx-6 sm:px-6">
-        <div className="sheet grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-4">
+      <div className="sticky top-0 z-20 -mx-3 bg-paper/95 px-3 pb-2 pt-2 backdrop-blur sm:-mx-6 sm:px-6 sm:pb-3 sm:pt-3">
+        <div className="sheet grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-3 py-1.5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:gap-y-2 sm:px-4 sm:py-2">
           <div className="min-w-0">
             <p className="font-hand text-2xl leading-none">
               {state.roundNumber === 0
@@ -373,7 +385,7 @@ export default function GamePage() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[220px_minmax(0,1fr)_300px]">
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[220px_minmax(0,1fr)_300px]">
         {/* canvas */}
         <div className="relative lg:order-1 xl:order-2">
           <Canvas key={`${state.roundNumber}-${replay.v}`} roomId={roomId} readOnly={!amDrawer} initialStrokes={replay.strokes} />
@@ -415,8 +427,8 @@ export default function GamePage() {
 
         {/* chat */}
         <section className="sheet flex flex-col overflow-hidden lg:order-2 lg:h-0 lg:min-h-full xl:order-3">
-          <h2 className="border-b-2 border-ink px-3 py-1.5 text-2xl leading-none">Chat</h2>
-          <div ref={chatBoxRef} className="h-56 space-y-1 overflow-y-auto px-3 py-2 text-[15px] lg:h-auto lg:min-h-0 lg:flex-1">
+          <h2 className="hidden border-b-2 border-ink px-3 py-1.5 text-2xl leading-none sm:block">Chat</h2>
+          <div ref={chatBoxRef} className="h-32 space-y-1 overflow-y-auto px-3 py-2 text-[15px] sm:h-56 lg:h-auto lg:min-h-0 lg:flex-1">
             {messages.length === 0 && (
               <p className="pt-2 text-center text-sm text-ink-faint">
                 {amDrawer ? 'Guesses will show up here.' : 'Type your guesses below.'}
@@ -521,7 +533,7 @@ export default function GamePage() {
 function WordDisplay({ state, amDrawer, iGuessed }: { state: GameState; amDrawer: boolean; iGuessed: boolean }) {
   if (state.phase === 'drawing' && amDrawer && state.secretWord) {
     return (
-      <p className="font-hand text-3xl leading-none">
+      <p className="font-hand text-2xl leading-none sm:text-3xl">
         <span className="mr-2 text-lg text-ink-soft">draw:</span>
         <span className="highlight">{state.secretWord}</span>
       </p>
@@ -531,7 +543,7 @@ function WordDisplay({ state, amDrawer, iGuessed }: { state: GameState; amDrawer
     const parts = state.wordPattern.split(' ');
     return (
       <div className="flex items-end gap-3">
-        <span className="flex flex-wrap items-end justify-center gap-x-4 gap-y-1 font-hand text-3xl leading-none" aria-label={`${state.wordPattern.replace(/[^_]/g, '').length} letters`}>
+        <span className="flex flex-wrap items-end justify-center gap-x-4 gap-y-1 font-hand text-2xl leading-none sm:text-3xl" aria-label={`${state.wordPattern.replace(/[^_]/g, '').length} letters`}>
           {parts.map((part, i) => (
             <span key={i} className="flex gap-1">
               {part.split('').map((c, j) =>
