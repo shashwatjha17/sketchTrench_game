@@ -26,7 +26,13 @@ public class GameRoom {
     /** words already drawn this game, so the pool doesn't repeat itself */
     public final Set<String> usedWords = ConcurrentHashMap.newKeySet();
 
-    public final Map<String, GuestPlayer> players = new LinkedHashMap<>();
+    /**
+     * Join order matters (drawer rotation, host hand-over), so it's a LinkedHashMap — wrapped,
+     * because REST threads, socket threads and timers all touch it at once. Single calls are
+     * safe; iterate only through {@link #orderedPlayers()} / {@link #humanPlayers()} (snapshots),
+     * and do check-then-act sequences inside {@code synchronized (room)}.
+     */
+    public final Map<String, GuestPlayer> players = java.util.Collections.synchronizedMap(new LinkedHashMap<>());
     public volatile String hostId;
     public volatile String status = "WAITING"; // WAITING | PLAYING | FINISHED
 
@@ -73,7 +79,9 @@ public class GameRoom {
     }
 
     public List<GuestPlayer> orderedPlayers() {
-        return players.values().stream().toList();
+        synchronized (players) {
+            return List.copyOf(players.values());
+        }
     }
 
     /**
@@ -95,6 +103,6 @@ public class GameRoom {
 
     /** Real players only (bots excluded) — drawers, hosts and kick electorates come from here. */
     public List<GuestPlayer> humanPlayers() {
-        return players.values().stream().filter(p -> !p.isBot).toList();
+        return orderedPlayers().stream().filter(p -> !p.isBot).toList();
     }
 }

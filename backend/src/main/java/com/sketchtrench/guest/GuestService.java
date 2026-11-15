@@ -117,16 +117,18 @@ public class GuestService {
         if ("FINISHED".equals(room.status)) {
             throw new ApiException(HttpStatus.CONFLICT, "GAME_OVER", "That game just finished");
         }
-        if (room.playerCount() >= room.maxPlayers) {
-            throw new ApiException(HttpStatus.CONFLICT, "ROOM_FULL", "Room is full");
-        }
         // joining mid-game is fine: you start on 0 points and guess from the current round on;
         // you'll get a drawing turn if the rotation reaches you before the game ends
-        player.score = 0;
-        player.isDrawing = false;
-        player.isHost = false;
-        room.players.put(player.playerId, player);
-        player.roomId = room.roomId;
+        synchronized (room) { // capacity check + add must be atomic, or simultaneous joins overfill
+            if (room.playerCount() >= room.maxPlayers) {
+                throw new ApiException(HttpStatus.CONFLICT, "ROOM_FULL", "Room is full");
+            }
+            player.score = 0;
+            player.isDrawing = false;
+            player.isHost = false;
+            room.players.put(player.playerId, player);
+            player.roomId = room.roomId;
+        }
         broadcastRoom(room);
         if ("PLAYING".equals(room.status)) {
             system(room, player.nickname + " joined the game");
@@ -141,20 +143,25 @@ public class GuestService {
         player.isHost = false;
         if (room == null) return;
         boolean wasDrawer = player.playerId.equals(room.drawerId);
-        room.players.remove(player.playerId);
-        room.kickVotes.remove(player.playerId);
-        room.kickVotes.values().forEach(v -> v.remove(player.playerId));
-
-        // bots alone don't keep a room alive
-        if (room.humanPlayers().isEmpty()) {
+        boolean empty;
+        // remove + "anyone left?" + host hand-over as one step: players leaving at the same
+        // moment (tabs closing, the away-reaper) must not see each other half-way
+        synchronized (room) {
+            room.players.remove(player.playerId);
+            room.kickVotes.remove(player.playerId);
+            room.kickVotes.values().forEach(v -> v.remove(player.playerId));
+            List<GuestPlayer> humans = room.humanPlayers();
+            empty = humans.isEmpty(); // bots alone don't keep a room alive
+            if (!empty && player.playerId.equals(room.hostId)) {
+                GuestPlayer next = humans.get(0);
+                room.hostId = next.playerId;
+                next.isHost = true;
+            }
+        }
+        if (empty) {
             cancelRoundTasks(room);
             rooms.remove(room.roomId);
             return;
-        }
-        if (player.playerId.equals(room.hostId)) {
-            GuestPlayer next = room.humanPlayers().get(0);
-            room.hostId = next.playerId;
-            next.isHost = true;
         }
         broadcastRoom(room);
         // the drawer walked out mid-round: nobody can draw, so close the round now
@@ -172,11 +179,12 @@ public class GuestService {
         if (!"WAITING".equals(room.status)) {
             throw new ApiException(HttpStatus.CONFLICT, "GAME_IN_PROGRESS", "Add bots before the game starts");
         }
-        if (room.playerCount() >= room.maxPlayers) {
+        List<GuestPlayer> everyone = room.orderedPlayers();
+        if (everyone.size() >= room.maxPlayers) {
             throw new ApiException(HttpStatus.CONFLICT, "ROOM_FULL", "Room is full");
         }
-        List<String> taken = room.players.values().stream().map(p -> p.nickname).toList();
-        long botCount = room.players.values().stream().filter(p -> p.isBot).count();
+        List<String> taken = everyone.stream().map(p -> p.nickname).toList();
+        long botCount = everyone.stream().filter(p -> p.isBot).count();
         if (botCount >= MAX_BOTS) {
             throw new ApiException(HttpStatus.CONFLICT, "TOO_MANY_BOTS", "That's enough bots for one room");
         }

@@ -7,20 +7,22 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:live": "BASE_URL=https://sketch-trench-game.vercel.app playwright test",
+    "load": "node loadtest/load.mjs"
   },
   "dependencies": {
     "@stomp/stompjs": "^7.0.0",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.0",
-    "sockjs-client": "^1.6.1"
+    "react-router-dom": "^6.26.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "@types/sockjs-client": "^1.5.4",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.39",

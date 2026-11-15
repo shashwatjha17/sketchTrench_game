@@ -42,9 +42,15 @@ export default function RoomPage() {
       setRoom(info);
       setError('');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Room not found');
+      // kicked while our socket was down (so the private "kicked" push never arrived)
+      if (err instanceof ApiError && err.code === 'KICKED') {
+        navigate('/?kicked=1', { replace: true });
+        return;
+      }
+      // a network blip isn't "room not found": keep what we have; the next reconnect reloads
+      setError(err instanceof ApiError ? err.message : "Can't reach the game server — retrying…");
     }
-  }, [roomId, session]);
+  }, [roomId, session, navigate]);
 
   useEffect(() => {
     load();

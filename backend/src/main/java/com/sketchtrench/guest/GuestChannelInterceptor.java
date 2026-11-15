@@ -15,7 +15,9 @@ import org.springframework.stereotype.Component;
  * WebSocket security for the guest flow:
  *  1. CONNECT — reads the {@code X-Player-Id} STOMP header, looks up the guest, and
  *     installs it as the session principal. Unknown players can't connect.
- *  2. SUBSCRIBE — only members of a room may subscribe to that room's topics.
+ *  2. SUBSCRIBE — only members of a room may subscribe to that room's topics. A non-member's
+ *     SUBSCRIBE is dropped, not rejected: a STOMP ERROR closes the whole socket, and the client
+ *     would reconnect, resubscribe and loop forever (e.g. a player kicked while reconnecting).
  */
 @Slf4j
 @Component
@@ -37,8 +39,8 @@ public class GuestChannelInterceptor implements ChannelInterceptor {
 
         if (StompCommand.CONNECT.equals(accessor.getCommand())) {
             authenticate(accessor);
-        } else if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
-            authorizeSubscribe(accessor);
+        } else if (StompCommand.SUBSCRIBE.equals(accessor.getCommand()) && !mayReceive(accessor)) {
+            return null; // drop it silently; the connection stays up
         }
         // DISCONNECT is handled by GuestPresenceListener (SessionDisconnectEvent fires for both
         // clean and dropped sockets) — unbinding here too made clean disconnects skip "away".
@@ -61,20 +63,22 @@ public class GuestChannelInterceptor implements ChannelInterceptor {
         }
     }
 
-    private void authorizeSubscribe(StompHeaderAccessor accessor) {
+    /** Room topics are for room members only; everything else (incl. /user/ queues) is open. */
+    boolean mayReceive(StompHeaderAccessor accessor) {
         String destination = accessor.getDestination();
         if (destination == null || destination.startsWith("/user/")) {
-            return;
+            return true;
         }
         String roomId = extractRoomId(destination);
-        if (roomId != null) {
-            GameRoom room = rooms.get(roomId);
-            boolean member = room != null && accessor.getUser() != null && room.players.containsKey(accessor.getUser().getName());
-            if (!member) {
-                log.warn("Player denied subscribe to {} (not a member)", destination);
-                throw new AccessDeniedException("Not a member of this room");
-            }
+        if (roomId == null) {
+            return true;
         }
+        GameRoom room = rooms.get(roomId);
+        boolean member = room != null && accessor.getUser() != null && room.players.containsKey(accessor.getUser().getName());
+        if (!member) {
+            log.info("Ignored subscribe to {} (not a member)", destination);
+        }
+        return member;
     }
 
     private String extractRoomId(String destination) {

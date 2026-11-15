@@ -60,3 +60,7 @@ target/
 
 # Environment
 .env
+# Playwright / test output
+frontend/e2e-report/
+frontend/test-results/
+frontend/e2e-results*.json
