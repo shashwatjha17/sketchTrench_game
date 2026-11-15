@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "e2e": "playwright test",
-    "e2e:live": "BASE_URL=https://sketch-trench-game.vercel.app playwright test"
+    "e2e:live": "BASE_URL=https://sketch-trench-game.vercel.app playwright test",
+    "load": "node loadtest/load.mjs"
   },
   "dependencies": {
     "@stomp/stompjs": "^7.0.0",
